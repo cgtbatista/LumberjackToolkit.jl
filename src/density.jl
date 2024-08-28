@@ -243,7 +243,7 @@ The `prop` argument is used to compute the density of a specific property, like 
 - `axis::String`: a String with the axis flag.
 - `prop::Vector{Float64}`: a Vector{Float64} with the property to be computed.
 """
-function ρ(bins::Vector{Float64}, positions::Vector{Point3D{Float64}}, N::Float64; axis="z", prop=nothing)
+function ρ(bins::Vector{Float64}, positions::Vector{StaticArrays.Point3D{Float64}}, N::Float64; axis="z", prop=nothing)
 
     if lowercase(string(axis)) == "x" || axis == 1
         coords = [ positions[i][1] for i in eachindex(positions) ]
