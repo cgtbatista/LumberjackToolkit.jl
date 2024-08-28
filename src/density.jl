@@ -171,7 +171,7 @@ function _get_reference(simulation::MolSimToolkit.Simulation, selection::String)
     idx = PDBTools.index.(reference_atoms)
 
     for frame in simulation
-        append!(xyz, mean(MolSimToolkit.positions(frame)[idx], dims=1))
+        append!(xyz, Statistics.mean(MolSimToolkit.positions(frame)[idx], dims=1))
     end
 
     return xyz
