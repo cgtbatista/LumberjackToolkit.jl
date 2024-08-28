@@ -155,15 +155,15 @@ end
 
 
 """
-    _get_reference(simulation::Simulation, selection::String)
+    _get_reference(simulation::MolSimToolkit.Simulation, selection::String)
 
 It aims to get the reference center for each frame along the trajectory.
 
 # Arguments
-- `simulation::Simulation`: a MolSimToolkit.Simulation object.
+- `simulation::MolSimToolkit.Simulation`: a MolSimToolkit.Simulation object.
 - `selection::String`: a selection string to get the reference center. For exemple, "all" or "not water".
 """
-function _get_reference(simulation::Simulation, selection::String)
+function _get_reference(simulation::MolSimToolkit.Simulation, selection::String)
 
     xyz = Point3D[]
 
@@ -281,17 +281,17 @@ function δ(value::Float64, lower::Float64, upper::Float64)
 end
 
 """
-    binning(simulation::Simulation; axis="z", resolution=1.)
+    binning(simulation::MolSimToolkit.Simulation; axis="z", resolution=1.)
 
 It reports the bins and normalization factor for the loaded simulation box.
 
 # Arguments
-- `simulation::Simulation`: a MolSimToolkit.Simulation object.
+- `simulation::MolSimToolkit.Simulation`: a MolSimToolkit.Simulation object.
 - `axis::String`: a String with the axis flag.
 - `dimensions::Int`: an integer with the number of dimensions. It can be 1 or 2.
 - `resolution::Float64`: a Float64 with the resolution of the bins.
 """
-function binning(simulation::Simulation; axis="z", dimensions=1, resolution=1.)
+function binning(simulation::MolSimToolkit.Simulation; axis="z", dimensions=1, resolution=1.)
     
     xmin, xmax = [ 0., 0., 0. ] , [ 0., 0., 0. ]
 
