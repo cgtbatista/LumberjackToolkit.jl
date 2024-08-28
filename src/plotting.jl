@@ -1,3 +1,35 @@
+function avg_densityprofile(distances::Vector{Vector{Float64}}, densities::Vector{Vector{Float64}}; profile=nothing, type=nothing)
+    
+    avg_distances, avg_densities, std_densities = averaging_profile(distances, densities)
+    
+    if profile == "number"
+        y = "number density (molecules/Å³)"
+    elseif profile == "mass"
+        y = "mass density (Da/Å³)"
+    elseif profile == "charge"
+        y = "charge density (e/Å³)"
+    elseif isnothing(profile) || profile == "electron"
+        y = "electron density (e/Å³)"
+    end
+
+    plotting = Plot.plot(avg_distances, avg_densities, label=:none, xlabel="distance (Å)", ylabel=y, linewidth=2)
+    if type == "error"
+        plotting = Plot.plot!(avg_distances, avg_densities, yerr=std_densities, marker=:circle)
+    elseif type == "box"
+        merging_densities = Float64[]
+        for i in eachindex(densities)
+            append!(merging_densities, densities[i])
+        end
+        merging_distances = Float64[]
+        for i in eachindex(distances)
+            append!(merging_distances, distances[i])
+        end
+        plotting = StatsPlots.boxplot!(merging_distances, merging_densities, label=:none, outliers=false, bar_width=0.25)
+    end
+
+    return plotting
+end
+
 ## RMSD
 
 function rmsd_plot(rmsd_data::String; timestep=1, md_time="ns", output_filename="rmsdplot.png")

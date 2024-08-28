@@ -1,15 +1,38 @@
-using PDBTools, MolSimToolkit, StatsPlots, Plots
+"""
+    densityprofile(pdb::String, trajectory::String; ...)
 
+It computes the density profile for each one of the frames inside the trajectory.
+
+# Arguments
+- `pdb::String`: a String with the pdb file path.
+- `trajectory::String`: a String with the trajectory file path.
+- `profile::String`: a String with the profile type. It can be "number", "mass", "charge", or "electron".
+- `selection::String`: a String with the selection of the atoms.
+- `axis::String`: a String with the axis flag.
+- `dimensions::Int`: an integer with the number of dimensions. It can be 1 or 2.
+- `resolution::Float64`: a Float64 with the resolution of the bins.
+- `center::Bool`: a Bool to center the profile.
+- `symmetry::Bool`: a Bool to apply the symmetry protocol.
+- `symmetry_selection::String`: a String with the selection of the atoms to apply the symmetry protocol.
+- `first::Int`: an integer with the first frame to be considered.
+- `step::Int`: an integer with the step to be considered.
+- `last::Int`: an integer with the last frame to be considered.
+- `charge_column::String`: a String with the charge column to be considered.
+- `edp::String`: a String with the electron density profile.
+- `charge_correction::Bool`: a Bool to apply the charge correction.
+- `normalization::Bool`: a Bool to apply the normalization.
+"""
 function densityprofile(
         pdb::String,
         trajectory::String;
-        profile="electron", selection="all", axis="z", resolution=1, center=true, symmetry=true, symmetry_selection="not water", first=1, step=1, last=nothing,
-        charge_column=nothing, edp=nothing, charge_correction=true
+        profile="electron", selection="all",
+        axis="z", dimensions=1, resolution=1, center=true, symmetry=true, symmetry_selection="not water", first=1, step=1, last=nothing,
+        charge_column=nothing, edp=nothing, charge_correction=true, normalization=true
     )
     
     distances, densities = [], []
 
-    println("DP -- $profile density distribution of the molecules inside the box:")
+    println("$(dimensions)D -- $profile density distribution of the molecules inside the box:")
     println("   the selection is `$selection`")
     println("   resolution on $axis is equal to $resolution Å")
     println("")
@@ -18,17 +41,17 @@ function densityprofile(
     selected_atoms = PDBTools.select(MolSimToolkit.atoms(simulation), selection)
     idx = PDBTools.index.(selected_atoms)
 
-    bins, V_norm = _unidimensional_binning(simulation, axis=axis, resolution=resolution)
+    bins, V_norm = binning(simulation, axis=axis, resolution=resolution)
     if symmetry || center;
         references = _get_reference(simulation, symmetry_selection)
-        if lowercase(string(axis)) == "x" || axis == 1
+        if lowercase(string(axis)) == "x"
             reference = [ ref[1] for ref in references ]
-        elseif lowercase(string(axis)) == "y" || axis == 2
+        elseif lowercase(string(axis)) == "y"
             reference = [ ref[2] for ref in references ]
-        elseif lowercase(string(axis)) == "z" || axis == 3
+        elseif lowercase(string(axis)) == "z"
             reference = [ ref[3] for ref in references ]
         else
-            println("Error: The axis flag must be related to the x, y, and z cartesian axes codification. For example, on axis z, it can be `z`, `Z` or `3`.")
+            throw(ArgumentError("The axis flag should be coded as `x`, `y`, or `z` strings."))
         end
     end
 
@@ -81,6 +104,16 @@ function densityprofile(
     return convert(Vector{Vector{Float64}}, distances), convert(Vector{Vector{Float64}}, densities)
 end
 
+
+"""
+    averaging_profile(distances::Vector{Vector{Float64}}, densities::Vector{Vector{Float64}})
+
+This function takes the `distances` and `densities` from Vector{Vector{Float64}} to Vector{Float64} by means and standard deviation computations.
+
+# Arguments
+- `distances::Vector{Vector{Float64}}`: a Vector{Vector{Float64}} with the distances from the center of the profile.
+- `densities::Vector{Vector{Float64}}`: a Vector{Vector{Float64}} with the densities of the profile.
+"""
 function averaging_profile(distances::Vector{Vector{Float64}}, densities::Vector{Vector{Float64}})
 
     avg_distances = Statistics.mean(hcat(distances...), dims=2)[:,1]
@@ -90,38 +123,16 @@ function averaging_profile(distances::Vector{Vector{Float64}}, densities::Vector
     return avg_distances, avg_densities, std_densities
 end
 
-function averaging_plotting(distances::Vector{Vector{Float64}}, densities::Vector{Vector{Float64}}; profile=nothing, type=nothing)
-    
-    avg_distances, avg_densities, std_densities = averaging_profile(distances, densities)
-    
-    if profile == "number"
-        y = "number density (molecules/Å³)"
-    elseif profile == "mass"
-        y = "mass density (Da/Å³)"
-    elseif profile == "charge"
-        y = "charge density (e/Å³)"
-    elseif isnothing(profile) || profile == "electron"
-        y = "electron density (e/Å³)"
-    end
 
-    plotting = plot(avg_distances, avg_densities, label=:none, xlabel="distance (Å)", ylabel=y, linewidth=2)
-    if type == "error"
-        plotting = plot!(avg_distances, avg_densities, yerr=std_densities, marker=:circle)
-    elseif type == "box"
-        merging_densities = Float64[]
-        for i in eachindex(densities)
-            append!(merging_densities, densities[i])
-        end
-        merging_distances = Float64[]
-        for i in eachindex(distances)
-            append!(merging_distances, distances[i])
-        end
-        plotting = boxplot!(merging_distances, merging_densities, label=:none, outliers=false, bar_width=0.25)
-    end
+"""
+    _ordering_symmetry(bins::Vector{Float64}, ρ::Vector{Float64})
 
-    return plotting
-end
+This function checks if the bins are ordered after the symmetry protocol and if not, it orders them.
 
+# Arguments
+- `bins::Vector{Float64}`: a Vector{Float64} with the bins.
+- `ρ::Vector{Float64}`: a Vector{Float64} with the densities.
+"""
 function _ordering_symmetry(bins::Vector{Float64}, ρ::Vector{Float64})
     if issorted(bins)
         return bins, ρ
@@ -132,10 +143,26 @@ function _ordering_symmetry(bins::Vector{Float64}, ρ::Vector{Float64})
     end
 end
 
+
+"""
+    average_bins(bins::Vector{Float64})
+
+It takes an average vector based on the binned box parameters. So it can be rightly compare with the ρ density with ``length(density) ≡ length(bins) - 1``.
+"""
 function average_bins(bins::Vector{Float64})
     return [ 0.5*(bins[i]+bins[i+1]) for i in 1:(length(bins)-1) ]
 end
 
+
+"""
+    _get_reference(simulation::Simulation, selection::String)
+
+It aims to get the reference center for each frame along the trajectory.
+
+# Arguments
+- `simulation::Simulation`: a MolSimToolkit.Simulation object.
+- `selection::String`: a selection string to get the reference center. For exemple, "all" or "not water".
+"""
 function _get_reference(simulation::Simulation, selection::String)
 
     xyz = Point3D[]
@@ -150,6 +177,17 @@ function _get_reference(simulation::Simulation, selection::String)
     return xyz
 end
 
+
+"""
+    _correct_center(bins::Vector{Float64}, reference::Float64)
+
+It corrects the bin values based on the referenced center. In this way, the center will become zero and all the bins values will be reajusted to apply it.
+Now, every distance is compared with the central value.
+
+# Arguments
+- `bins::Vector{Float64}`: a Vector{Float64} with the bins.
+- `reference::Float64`: a Float64 with the reference center.
+"""
 function _correct_center(bins::Vector{Float64}, reference::Float64)
     
     idx = findfirst(x -> x >= reference, bins)
@@ -159,6 +197,15 @@ function _correct_center(bins::Vector{Float64}, reference::Float64)
     return centered_bins
 end
 
+"""
+    _correct_symmetry(bins::Vector{Float64}, reference::Float64)
+
+Do the same thing that `_correct_center(...)`, but it extends the concept to adjust the data in such way that the center will become the center of the box in every frame.
+
+# Arguments
+- `bins::Vector{Float64}`: a Vector{Float64} with the bins.
+- `reference::Float64`: a Float64 with the reference center.
+"""
 function _correct_symmetry(bins::Vector{Float64}, reference::Float64)
     
     symmetric_bins = Float64[]
@@ -182,7 +229,21 @@ function _correct_symmetry(bins::Vector{Float64}, reference::Float64)
     return symmetric_bins
 end
 
-function ρ(bins::Vector{Float64}, positions::Vector{Point3D{Float64}}, Nfactor::Float64; axis="z", prop=nothing)
+
+"""
+    ρ(bins::Vector{Float64}, positions::Vector{Point3D{Float64}}, N::Float64; axis="z", prop=nothing)
+
+Computes the density for each bin interval given the frame positions. Here, we apply a normalization base on the bin dimensions, so all the frames will have the same `sum(ρ)`.
+The `prop` argument is used to compute the density of a specific property, like the atomic number, mass, or charge.
+
+# Arguments
+- `bins::Vector{Float64}`: a Vector{Float64} with the bin intervals.
+- `positions::Vector{Point3D{Float64}}`: a Vector{Point3D{Float64}} with the atomic positions.
+- `N::Float64`: a Float64 with the normalization factor.
+- `axis::String`: a String with the axis flag.
+- `prop::Vector{Float64}`: a Vector{Float64} with the property to be computed.
+"""
+function ρ(bins::Vector{Float64}, positions::Vector{Point3D{Float64}}, N::Float64; axis="z", prop=nothing)
 
     if lowercase(string(axis)) == "x" || axis == 1
         coords = [ positions[i][1] for i in eachindex(positions) ]
@@ -198,15 +259,20 @@ function ρ(bins::Vector{Float64}, positions::Vector{Point3D{Float64}}, Nfactor:
     
     for b in eachindex(bins)
         if b == lastindex(bins); break; end
-        δ = δ_bin.(coords, bins[b], bins[b+1])
-        ith_ρ = sum(δ .* prop) / Nfactor
+        coded = δ.(coords, bins[b], bins[b+1])
+        ith_ρ = sum(coded .* prop) / N
         append!(ρ, ith_ρ)
     end
 
     return ρ
 end
 
-function δ_bin(value::Float64, lower::Float64, upper::Float64)
+"""
+    δ(value::Float64, lower::Float64, upper::Float64)
+
+It is an indicator function that maps the elements inside ``x_lower ≤ x_value ≤ x_upper`` interval.
+"""
+function δ(value::Float64, lower::Float64, upper::Float64)
     if lower <= value <= upper
         return 1
     else
@@ -214,7 +280,18 @@ function δ_bin(value::Float64, lower::Float64, upper::Float64)
     end
 end
 
-function _unidimensional_binning(simulation::Simulation; axis="z", resolution=1)
+"""
+    binning(simulation::Simulation; axis="z", resolution=1.)
+
+It reports the bins and normalization factor for the loaded simulation box.
+
+# Arguments
+- `simulation::Simulation`: a MolSimToolkit.Simulation object.
+- `axis::String`: a String with the axis flag.
+- `dimensions::Int`: an integer with the number of dimensions. It can be 1 or 2.
+- `resolution::Float64`: a Float64 with the resolution of the bins.
+"""
+function binning(simulation::Simulation; axis="z", dimensions=1, resolution=1.)
     
     xmin, xmax = [ 0., 0., 0. ] , [ 0., 0., 0. ]
 
@@ -242,26 +319,3 @@ function _unidimensional_binning(simulation::Simulation; axis="z", resolution=1)
     return collect(i_min:resolution:i_max), Float64(resolution*L1*L2)
 end
 
-
-function vmd_get_charges(rawfile::String; newpdb="new.pdb", pdb_column="beta", vmd="vmd")
-    
-    psf = rawfile * ".psf"
-    pdb = rawfile * ".pdb"
-
-    vmdinput_file = tempname() * ".tcl"
-    
-    vmdinput = open(vmdinput_file, "w")
-    Base.write(vmdinput, "mol new \"$psf\" \n")
-    Base.write(vmdinput, "mol addfile \"$pdb\" \n")
-    Base.write(vmdinput, "set sel [ atomselect top \"all\" ] \n")
-    Base.write(vmdinput, "\$sel set $pdb_column [\$sel get charge] \n")
-    Base.write(vmdinput, "\$sel writepdb $newpdb \n")
-    Base.write(vmdinput, "\n")
-    Base.write(vmdinput, "exit")
-    Base.close(vmdinput)
-    vmdoutput = split(Base.read(`$vmd -dispdev text -e $vmdinput_file`, String), "\n")
-
-    Base.rm(vmdinput_file)
-    
-    return vmdoutput
-end
