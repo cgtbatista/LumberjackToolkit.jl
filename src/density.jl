@@ -84,7 +84,7 @@ function densityprofile(
         i = simulation.frame_index
         println("    - frame $i")
         coords = positions(frame)[idx]
-        new_coords = [ Point3D(coords[n][1], coords[n][2], coords[n][3]) for n in eachindex(coords) ]
+        new_coords = [ StaticArrays.Point3D(coords[n][1], coords[n][2], coords[n][3]) for n in eachindex(coords) ]
 
         d = ρ(bins, new_coords, V_norm, axis=axis, prop=property)
 
@@ -165,7 +165,7 @@ It aims to get the reference center for each frame along the trajectory.
 """
 function _get_reference(simulation::MolSimToolkit.Simulation, selection::String)
 
-    xyz = Point3D[]
+    xyz = StaticArrays.Point3D[]
 
     reference_atoms = PDBTools.select(MolSimToolkit.atoms(simulation), selection)
     idx = PDBTools.index.(reference_atoms)

@@ -3,7 +3,7 @@ module LumberjackToolkit
 import PDBTools
 import MolSimToolkit
 import LinearAlgebra
-import Statistics
+import Statistics, StaticArrays
 import StatsPlots, Plots
 
 
