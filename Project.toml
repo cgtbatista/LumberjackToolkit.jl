@@ -3,6 +3,14 @@ uuid = "9436c28a-3a11-4285-967d-6d93894472c7"
 authors = ["cgtbatista <c203748@dac.unicamp.br> and contributors"]
 version = "1.0.0-DEV"
 
+[deps]
+PDBTools ="e29189f1-7114-4dbd-93d0-c5673a921a58"
+MolSimToolkit = "054db54f-6694-444d-9bbb-e9ecdbfe77be"
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
+StatsPlots = "f3b207a7-027a-5e70-b257-86293d7955fd"
+Plots = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
+
 [compat]
 julia = "1.6.7"
 
