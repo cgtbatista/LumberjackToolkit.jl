@@ -12,9 +12,9 @@ function avg_densityprofile(distances::Vector{Vector{Float64}}, densities::Vecto
         y = "electron density (e/Å³)"
     end
 
-    plotting = Plot.plot(avg_distances, avg_densities, label=:none, xlabel="distance (Å)", ylabel=y, linewidth=2)
+    plotting = Plots.plot(avg_distances, avg_densities, label=:none, xlabel="distance (Å)", ylabel=y, linewidth=2)
     if type == "error"
-        plotting = Plot.plot!(avg_distances, avg_densities, yerr=std_densities, marker=:circle)
+        plotting = Plots.plot!(avg_distances, avg_densities, yerr=std_densities, marker=:circle)
     elseif type == "box"
         merging_densities = Float64[]
         for i in eachindex(densities)
