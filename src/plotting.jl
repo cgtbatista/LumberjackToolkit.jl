@@ -1,20 +1,11 @@
-function avg_densityprofile(distances::Vector{Vector{Float64}}, densities::Vector{Vector{Float64}}; profile=nothing, type=nothing)
+function avg_densityprofile(distances::Vector{Vector{Float64}}, densities::Vector{Vector{Float64}}; profile=nothing, type=nothing,
+    xlabel="distance (Å)", ylabel="electron density (e/Å³)", label=:none, linewidth=2, bar_width=0.25, marker=:circle, ms=4, lcol=:blue, pcol=:red)
     
     avg_distances, avg_densities, std_densities = averaging_profile(distances, densities)
     
-    if profile == "number"
-        y = "number density (molecules/Å³)"
-    elseif profile == "mass"
-        y = "mass density (Da/Å³)"
-    elseif profile == "charge"
-        y = "charge density (e/Å³)"
-    elseif isnothing(profile) || profile == "electron"
-        y = "electron density (e/Å³)"
-    end
-
-    plotting = Plots.plot(avg_distances, avg_densities, label=:none, xlabel="distance (Å)", ylabel=y, linewidth=2)
+    plotting = Plots.plot(avg_distances, avg_densities, label=label, xlabel=xlabel, ylabel=ylabel, linewidth=linewidth, color=lcol)
     if type == "error"
-        plotting = Plots.plot!(avg_distances, avg_densities, yerr=std_densities, marker=:circle)
+        plotting = Plots.scatter!(avg_distances, avg_densities, yerr=std_densities, marker=marker, color=pcol, ms=ms)
     elseif type == "box"
         merging_densities = Float64[]
         for i in eachindex(densities)
@@ -24,7 +15,7 @@ function avg_densityprofile(distances::Vector{Vector{Float64}}, densities::Vecto
         for i in eachindex(distances)
             append!(merging_distances, distances[i])
         end
-        plotting = StatsPlots.boxplot!(merging_distances, merging_densities, label=:none, outliers=false, bar_width=0.25)
+        plotting = StatsPlots.boxplot!(merging_distances, merging_densities, label=label, outliers=false, bar_width=bar_width)
     end
 
     return plotting
