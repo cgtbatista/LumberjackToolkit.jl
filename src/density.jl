@@ -84,7 +84,7 @@ function densityprofile(
         i = simulation.frame_index
         println("    - frame $i")
         coords = positions(frame)[idx]
-        new_coords = [ StaticArrays.Point3D(coords[n][1], coords[n][2], coords[n][3]) for n in eachindex(coords) ]
+        new_coords = [ MolSimToolkit.Point3D(coords[n][1], coords[n][2], coords[n][3]) for n in eachindex(coords) ]
 
         d = ρ(bins, new_coords, V_norm, axis=axis, prop=property)
 
@@ -165,7 +165,7 @@ It aims to get the reference center for each frame along the trajectory.
 """
 function _get_reference(simulation::MolSimToolkit.Simulation, selection::String)
 
-    xyz = StaticArrays.Point3D[]
+    xyz = MolSimToolkit.Point3D[]
 
     reference_atoms = PDBTools.select(MolSimToolkit.atoms(simulation), selection)
     idx = PDBTools.index.(reference_atoms)
@@ -243,7 +243,7 @@ The `prop` argument is used to compute the density of a specific property, like 
 - `axis::String`: a String with the axis flag.
 - `prop::Vector{Float64}`: a Vector{Float64} with the property to be computed.
 """
-function ρ(bins::Vector{Float64}, positions::Vector{StaticArrays.Point3D{Float64}}, N::Float64; axis="z", prop=nothing)
+function ρ(bins::Vector{Float64}, positions::Vector{MolSimToolkit.Point3D{Float64}}, N::Float64; axis="z", prop=nothing)
 
     if lowercase(string(axis)) == "x" || axis == 1
         coords = [ positions[i][1] for i in eachindex(positions) ]
