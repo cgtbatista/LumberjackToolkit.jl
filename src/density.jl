@@ -83,7 +83,7 @@ function densityprofile(
     for frame in simulation
         i = simulation.frame_index
         println("    - frame $i")
-        coords = positions(frame)[idx]
+        coords = MolSimToolkit.positions(frame)[idx]
         new_coords = [ MolSimToolkit.Point3D(coords[n][1], coords[n][2], coords[n][3]) for n in eachindex(coords) ]
 
         d = ρ(bins, new_coords, V_norm, axis=axis, prop=property)
@@ -171,7 +171,7 @@ function _get_reference(simulation::MolSimToolkit.Simulation, selection::String)
     idx = PDBTools.index.(reference_atoms)
 
     for frame in simulation
-        append!(xyz, mean(positions(frame)[idx], dims=1))
+        append!(xyz, mean(MolSimToolkit.positions(frame)[idx], dims=1))
     end
 
     return xyz
@@ -296,7 +296,7 @@ function binning(simulation::MolSimToolkit.Simulation; axis="z", dimensions=1, r
     xmin, xmax = [ 0., 0., 0. ] , [ 0., 0., 0. ]
 
     for frame in simulation
-        atomic_coordinates = positions(frame)
+        atomic_coordinates = MolSimToolkit.positions(frame)
         x = [ atom[1] for atom in atomic_coordinates ]; y = [ atom[2] for atom in atomic_coordinates ]; z = [ atom[3] for atom in atomic_coordinates ];
         xmin[1], xmax[1] = ifelse(minimum(x) < xmin[1], minimum(x), xmin[1]), ifelse(maximum(x) > xmax[1], maximum(x), xmax[1])
         xmin[2], xmax[2] = ifelse(minimum(y) < xmin[2], minimum(y), xmin[2]), ifelse(maximum(y) > xmax[2], maximum(y), xmax[2])

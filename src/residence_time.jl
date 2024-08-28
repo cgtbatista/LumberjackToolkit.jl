@@ -27,7 +27,7 @@ function water_lignin(pdbfile::String, trajectory::String, segment::String; nonh
         ## ith frame, monitored residue, monitored atom name, monitored segment name, reference atom name, reference segment name, minimum distance
         for frame in simulation
             ith_frame = simulation.frame_index; println("    - frame $ith_frame")
-            coor = positions(frame)
+            coor = MolSimToolkit.positions(frame)
             uc = diag(unitcell(frame))
             water_lignin = minimum_distances(
                 xpositions = [ SVector(coor[i]) for i in imonitored ], # solvent - the monitored atoms around the reference (e.g. xylan and mannans)
@@ -81,7 +81,7 @@ function water_lignin(pdbfile::String, trajectory::String, segment1::String, seg
         ## ith frame, monitored residue, monitored atom name, monitored segment name, reference atom name, reference segment name, minimum distance
         for frame in simulation
             ith_frame = simulation.frame_index; println("    - frame $ith_frame")
-            coor = positions(frame)
+            coor = MolSimToolkit.positions(frame)
             uc = diag(unitcell(frame))
             water_lignin = minimum_distances(
                 xpositions = [ SVector(coor[i]) for i in imonitored ], # solvent - the monitored atoms around the reference (e.g. xylan and mannans)
@@ -140,7 +140,7 @@ function water_lcc(pdbfile::String, trajectory::String, segment1::String, segmen
         ## ith frame, monitored residue, monitored atom name, monitored segment name, reference atom name, reference segment name, minimum distance
         for frame in simulation
             ith_frame = simulation.frame_index; println("    - frame $ith_frame")
-            coor = positions(frame)
+            coor = MolSimToolkit.positions(frame)
             uc = diag(unitcell(frame))
             water_lcc = minimum_distances(
                 xpositions = [ SVector(coor[i]) for i in imonitored ], # solvent - the monitored atoms around the reference (e.g. xylan and mannans)
@@ -199,7 +199,7 @@ function water_segment(pdbfile::String, trajectory::String, segment::String; non
         ## ith frame, monitored residue, monitored atom name, monitored segment name, reference atom name, reference segment name, minimum distance
         for frame in simulation
             ith_frame = simulation.frame_index; println("    - frame $ith_frame")
-            coor = positions(frame)
+            coor = MolSimToolkit.positions(frame)
             uc = diag(unitcell(frame))
             water_polymer = minimum_distances(
                 xpositions = [ SVector(coor[i]) for i in imonitored ], # solvent - the monitored atoms around the reference (e.g. water)

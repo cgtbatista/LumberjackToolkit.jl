@@ -68,7 +68,7 @@ function mindist(pdbfile::String, trajectory::String, segment::String; ffirst=1,
         ## ith frame, monitored residue, monitored atom name, monitored segment name, reference atom name, reference segment name, minimum distance
         for frame in simulation
             ith_frame = simulation.frame_index; println("    - frame $ith_frame")
-            coor = positions(frame)
+            coor = MolSimToolkit.positions(frame)
             uc = diag(unitcell(frame))
             crosspairs_system = CrossPairs(
                 xpositions = [ SVector(coor[i]) for i in imonitored ], # solvent - the monitored atoms around the reference (e.g. xylan and mannans)

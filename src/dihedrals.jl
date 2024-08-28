@@ -61,7 +61,7 @@ function hemicellulose_dihedrals(pdbfile::String, trajectory::String, segment::S
         ## ith frame, monitored residue, monitored atom name, monitored segment name, reference atom name, reference segment name, minimum distance
         for frame in simulation
             ith_frame = simulation.frame_index; println("    - frame $ith_frame")
-            coor = positions(frame)
+            coor = MolSimToolkit.positions(frame)
             ## wrinting the output dat file
             resid_token = first_xylan_residue
             while resid_token < last_xylan_residue
@@ -118,7 +118,7 @@ function hemicellulose_dihedrals2(pdbfile::String, trajectory::String, segment::
         ## ith frame, monitored residue, monitored atom name, monitored segment name, reference atom name, reference segment name, minimum distance
         for frame in simulation
             ith_frame = simulation.frame_index; println("    - frame $ith_frame")
-            coor = positions(frame)
+            coor = MolSimToolkit.positions(frame)
             ## wrinting the output dat file
             resid_token = first_xylan_residue
             while resid_token < last_xylan_residue
