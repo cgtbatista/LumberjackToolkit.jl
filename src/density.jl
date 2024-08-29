@@ -21,21 +21,26 @@ It computes the density profile for each one of the frames inside the trajectory
 - `edp::String`: a String with the electron density profile.
 - `charge_correction::Bool`: a Bool to apply the charge correction.
 - `normalization::Bool`: a Bool to apply the normalization.
+- `echo::Bool`: a Bool to print or not the output.
 """
 function densityprofile(
         pdb::String,
         trajectory::String;
         profile="electron", selection="all",
         axis="z", dimensions=1, resolution=1, center=true, symmetry=true, symmetry_selection="not water", first=1, step=1, last=nothing,
-        charge_column=nothing, edp=nothing, charge_correction=true, normalization=true
+        charge_column=nothing, edp=nothing, charge_correction=true, normalization=true, echo=true
     )
     
     distances, densities = [], []
 
-    println("$(dimensions)D -- $profile density distribution of the molecules inside the box:")
-    println("   the selection is `$selection`")
-    println("   resolution on $axis is equal to $resolution Å")
-    println("")
+    ####    output
+    if echo
+        println("$(dimensions)D -- $profile density distribution of the molecules inside the box:")
+        println("   the selection is `$selection`")
+        println("   resolution on $axis is equal to $resolution Å")
+        println("")
+    end
+    ####
 
     simulation = MolSimToolkit.Simulation(pdb, trajectory; first=first, last=last, step=step)
     selected_atoms = PDBTools.select(MolSimToolkit.atoms(simulation), selection)
@@ -56,8 +61,6 @@ function densityprofile(
     end
 
     if profile == "number"
-        println("   ... choosing the number of molecules density profile (NDP)")
-        println("")
         property = ones(Float64, length(idx))
     elseif profile == "mass"
         property = PDBTools.atomic_mass.(selected_atoms)
@@ -82,7 +85,9 @@ function densityprofile(
 
     for frame in simulation
         i = simulation.frame_index
-        println("    - frame $i")
+        ####    output
+        if echo; println("    - frame $i"); end
+        ####
         coords = MolSimToolkit.positions(frame)[idx]
         new_coords = [ MolSimToolkit.Point3D(coords[n][1], coords[n][2], coords[n][3]) for n in eachindex(coords) ]
 
@@ -100,6 +105,14 @@ function densityprofile(
         push!(distances, new_bins)
         push!(densities, d)
     end
+    
+    ####    output
+    if echo
+        println("")
+        println("The density profile was computed successfully.")
+        println("")
+    end
+    ####
 
     return convert(Vector{Vector{Float64}}, distances), convert(Vector{Vector{Float64}}, densities)
 end
