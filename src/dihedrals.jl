@@ -1,47 +1,27 @@
-## dihedral
+"""
+    dihedral(atom1::StaticArrays.SVector, atom2::StaticArrays.SVector, atom3::StaticArrays.SVector, atom4::StaticArrays.SVector)
 
-function dihedral(atom_1::SVector, atom_2::SVector, atom_3::SVector, atom_4::SVector)
-    # getting the vectors
-    v1 = atom_2 - atom_1; v2 = atom_3 - atom_2; v3 = atom_4 - atom_3
-    # getting the plane data - cross product of the vectors
-    n1 = cross(v1,v2); n2 = cross(v2,v3)
-    u1 = cross(n1,n2); unitary_v2 = v2/norm(v2)
-    # getting the dihedral angle using the -- atan function
-    m1 = dot(u1, unitary_v2)
-    m2 = dot(n1,n2)
-    dihedral_angle = atan(m1,m2) * (180 / π)
-    # standartization of the dihedral angle to be positive
-    if dihedral_angle < 0
-        dihedral_angle = 360 + dihedral_angle
-    end; return dihedral_angle
-end
+Calculate the dihedral angle between four atoms. The dihedral angle is the angle between the planes defined by the atoms (atom1, atom2, atom3)
+and (atom2, atom3, atom4). The dihedral angle is calculated using the atan method.
+"""
+function dihedral(
+            atom1::StaticArrays.SVector,
+            atom2::StaticArrays.SVector,
+            atom3::StaticArrays.SVector,
+            atom4::StaticArrays.SVector
+        )
+    
+    v1, v2, v3 = atom2 - atom1, atom3 - atom2, atom4 - atom3
+    
+    w1, w2 = cross(v1, v2), cross(v2, v3)
+    
+    dihedral = atand(
+                dot(cross(w1, w2), v2/norm(v2)),
+                dot(w1, w2)
+            )
+    
+    return mod(dihedral, 360.0)
 
-# ERROR!!!
-#function dihedral2(atom_1::SVector, atom_2::SVector, atom_3::SVector, atom_4::SVector)
-#    # getting the vectors
-#    v1 = atom_2 - atom_1; v2 = atom_3 - atom_2; v3 = atom_4 - atom_3
-#    # getting the plane data - cross product of the vectors
-#    n1 = cross(v1,v2)/norm(cross(v1,v2))
-#    n2 = cross(v2,v3)/norm(cross(v2,v3))
-#    # getting the dihedral angle using the -- atan function
-#    m1 = cross(n1,v2/norm(v2))
-#    x = dot(n1,n2)
-#    y = dot(m1,n2)
-#    dihedral_angle = atan(y,x) * (180 / π)
-#    # standartization of the dihedral angle to be positive
-#    if dihedral_angle < 0
-#        dihedral_angle = 360 + dihedral_angle
-#    end; return dihedral_angle
-#end
-
-## select_pdb_atom
-## aim to get the atom selection by the PDBTools using Julia syntax
-function select_pdb_atom(atom, segname, resnum, name)
-    if atom.segname == segname && atom.resnum == resnum && atom.name == name
-        return true
-    else
-        return false
-    end
 end
 
 function hemicellulose_dihedrals(pdbfile::String, trajectory::String, segment::String, first_xylan_residue::Int64, last_xylan_residue::Int64;

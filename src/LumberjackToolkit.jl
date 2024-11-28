@@ -14,6 +14,8 @@ export vmd_get_charges
 
 export avg_densityprofile
 
+export simulation_steps
+
 # Getting some properties profiles using the density distribution (e.g. electron density profile of POPC on the box)
 include("./density.jl")
 
@@ -21,5 +23,7 @@ include("./density.jl")
 include("./plotting.jl")
 # others
 include("./vmd-scripts.jl")
+
+include("./utils.jl")
 
 end

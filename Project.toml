@@ -14,11 +14,22 @@ StatsPlots = "f3b207a7-027a-5e70-b257-86293d7955fd"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [compat]
+LinearAlgebra = "1.10"
+MolSimToolkit = "1.22"
+PDBTools = "1.8.1"
+Plots = "1.29"
+StaticArrays = "1.6"
+Statistics = "1.10.0"
+StatsPlots = "0.15.7"
+Test = "1.9"
+TestItemRunner = "1"
+TestItems = "1"
 julia = "1.6.7"
-MolSimToolkit = "1.16.0"
 
 [extras]
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+TestItemRunner = "f8b46487-2199-4994-9208-9a1283c18c0a"
+TestItems = "1c621080-faea-4a02-84b6-bbd5e436b8fe"
 
 [targets]
-test = ["Test"]
+test = ["Test", "TestItems", "TestItemRunner"]
