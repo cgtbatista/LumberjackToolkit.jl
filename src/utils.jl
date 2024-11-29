@@ -50,3 +50,39 @@ function simulation_steps(t_simulation::Int64; unit="ns", timestep=2.0, output=1
     return steps, frames
 
 end
+
+function dihedral_atoms(dihedral::String, resnum::Int64; sep=" ")
+    
+    names, resnums = String[], Int64[]
+
+    atoms = String.(split(dihedral, sep))
+
+    for atom in atoms
+        if occursin("'", atom)
+            push!(names, replace(atom, "'" => ""))
+            push!(resnums, resnum)
+        else
+            push!(names, atom)
+            push!(resnums, resnum+1)
+        end
+    end
+
+    return names, resnums
+
+end
+
+function dihedral_indexes(atoms::Vector{PDBTools.Atom}, segname::String, resnum::Int64; dihedral="O5'-C1'-O4-C4", sep="-")
+    
+    indexes = Int64[]
+
+    names, resnums = dihedral_atoms(dihedral, resnum, sep=sep)
+
+    for (name, resnum) in zip(names, resnums)
+        idx = PDBTools.index.(
+                            PDBTools.select(atoms, atom -> (atom.segname == segname) && (atom.resnum == resnum) && (atom.name == name))
+                        )[1]
+        push!(indexes, idx)
+    end
+
+    return indexes    
+end

@@ -2,10 +2,12 @@ module LumberjackToolkit
 
 import PDBTools
 import MolSimToolkit
-import LinearAlgebra
-import Statistics, StaticArrays
+import Statistics
 import StatsPlots, Plots
 
+import Printf: @sprintf, @printf
+import StaticArrays: @SVector, SVector
+import LinearAlgebra: norm, dot, cross
 
 export densityprofile
 export ρ, δ
@@ -14,11 +16,11 @@ export vmd_get_charges
 
 export avg_densityprofile
 
-export simulation_steps
+export simulation_steps, dihedral_atoms, dihedral_indexes, dihedrals
 
 # Getting some properties profiles using the density distribution (e.g. electron density profile of POPC on the box)
 include("./density.jl")
-
+include("./dihedrals.jl")
 
 include("./plotting.jl")
 # others

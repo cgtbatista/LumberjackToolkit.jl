@@ -10,6 +10,8 @@ popc_dcd = joinpath(@__DIR__, "../test/popc/popc.dcd")
 # only water and POPC lipid molecules.
 # NPT ensemble (300K and 1.0 atm)
 
+## S2 - Softwood Secondary Cell Wall
+
 ### MAIN TESTS
 
 @testset "Checking the densityprofile(...)" begin

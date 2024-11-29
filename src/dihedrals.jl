@@ -1,15 +1,17 @@
+struct DihedralData
+    atom1::String
+    atom2::String
+    atom3::String
+    atom4::String
+end
+
 """
     dihedral(atom1::StaticArrays.SVector, atom2::StaticArrays.SVector, atom3::StaticArrays.SVector, atom4::StaticArrays.SVector)
 
 Calculate the dihedral angle between four atoms. The dihedral angle is the angle between the planes defined by the atoms (atom1, atom2, atom3)
 and (atom2, atom3, atom4). The dihedral angle is calculated using the atan method.
 """
-function dihedral(
-            atom1::StaticArrays.SVector,
-            atom2::StaticArrays.SVector,
-            atom3::StaticArrays.SVector,
-            atom4::StaticArrays.SVector
-        )
+function dihedral(atom1::SVector, atom2::SVector, atom3::SVector, atom4::SVector)
     
     v1, v2, v3 = atom2 - atom1, atom3 - atom2, atom4 - atom3
     
@@ -21,6 +23,97 @@ function dihedral(
             )
     
     return mod(dihedral, 360.0)
+
+end
+
+function dihedrals(
+                pdbname::String, trajectory::String, segname::String;
+                first_resid=3, last_resid=98,
+                first=1, last=nothing, step=1,
+                outfile=nothing
+            )
+
+    println(" ~~ Loading the simulation data...")
+    simulation = MolSimToolkit.Simulation(
+                            pdbname,
+                            trajectory;
+                            first=first, last=last, step=step
+                        )
+
+    println(" ~~ Picking all of the $segname atoms:")
+    atoms = PDBTools.readPDB(pdbname, only = (atom -> atom.segname == segname))
+    
+    println(" ~~ Calculating the dihedrals associated to each residue pair:")
+    
+    if !isnothing(outfile)
+        out = Base.open(outfile, "w")
+    end
+
+    ## ith frame, monitored residue, monitored atom name, monitored segment name, reference atom name, reference segment name, minimum distance
+    for frame in simulation
+        
+        i = simulation.frame_index
+        println("    frame $i")
+        println("")
+
+        coor = MolSimToolkit.positions(frame)
+        
+        resid = first_resid
+
+        while resid < last_resid
+            
+            # getting the ϕ dihedral angle
+            ϕ_atoms = dihedral_indexes(atoms, segname, resid, dihedral="O5'-C1'-O4-C4", sep="-")
+            ϕ = dihedral(
+                    @SVector([ coor[ϕ_atoms[1]][1], coor[ϕ_atoms[1]][2], coor[ϕ_atoms[1]][3] ]),
+                    @SVector([ coor[ϕ_atoms[2]][1], coor[ϕ_atoms[2]][2], coor[ϕ_atoms[2]][3] ]),
+                    @SVector([ coor[ϕ_atoms[3]][1], coor[ϕ_atoms[3]][2], coor[ϕ_atoms[3]][3] ]),
+                    @SVector([ coor[ϕ_atoms[4]][1], coor[ϕ_atoms[4]][2], coor[ϕ_atoms[4]][3] ])
+                )
+            
+            # getting the ψ dihedral angle
+            ψ_atoms = dihedral_indexes(atoms, segname, resid, dihedral="C1'-O4-C4-C3", sep="-")
+            ψ = dihedral(
+                    @SVector([ coor[ψ_atoms[1]][1], coor[ψ_atoms[1]][2], coor[ψ_atoms[1]][3] ]),
+                    @SVector([ coor[ψ_atoms[2]][1], coor[ψ_atoms[2]][2], coor[ψ_atoms[2]][3] ]),
+                    @SVector([ coor[ψ_atoms[3]][1], coor[ψ_atoms[3]][2], coor[ψ_atoms[3]][3] ]),
+                    @SVector([ coor[ψ_atoms[4]][1], coor[ψ_atoms[4]][2], coor[ψ_atoms[4]][3] ])
+                )
+            
+            ϕ = mod(ϕ, 360.0)
+            ψ = mod(ψ, 360.0)
+
+            sum_angles = mod(ϕ+ψ, 360.0)
+
+            info = (
+                i,
+                resid,
+                resid+1,
+                ϕ,
+                ψ,
+                sum_angles
+            )
+            @printf("%d %d %d %.2f %.2f %.2f\n", info...)
+
+
+            if !isnothing(outfile)
+                Base.write(out, "$i $resid $(resid+1) $ϕ $ψ $sum_angles\n")
+            end
+
+            resid += 1
+
+        end
+        
+    end
+
+    if !isnothing(outfile)
+        Base.close(out)
+    end
+
+    println("")
+    println(" ~~ Done!")
+    
+    return nothing
 
 end
 
