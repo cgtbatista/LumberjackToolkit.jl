@@ -6,8 +6,8 @@ import Statistics
 import StatsPlots, Plots
 
 import Printf: @sprintf, @printf
-import StaticArrays: @SVector, SVector
-import LinearAlgebra: norm, dot, cross
+import StaticArrays: @SVector, SVector, SMatrix, @SMatrix
+import LinearAlgebra: norm, dot, cross, diag
 
 export densityprofile
 export ρ, δ
@@ -18,6 +18,7 @@ export avg_densityprofile
 
 export CarbohydrateDihedrals
 export simulation_steps, dihedral_atoms, dihedral_indexes, dihedrals
+export get_pressure
 
 # Getting some properties profiles using the density distribution (e.g. electron density profile of POPC on the box)
 include("./density.jl")

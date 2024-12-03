@@ -51,3 +51,36 @@ function simulation_steps(t_simulation::Int64; unit="ns", timestep=2.0, output=1
 
 end
 
+function get_pressure(logname::String; flag="PRESSURE", unit="bar", last=true)
+    return get_pressure(split(Base.read(logname, String), "\n"); flag=flag, unit=unit, last=last)
+end
+
+function get_pressure(logfile::Vector{SubString{String}}; flag="PRESSURE", unit="bar", last=true)
+
+    p = Vector{SMatrix}()
+
+    for line in logfile
+        l = split(line)
+
+        if !occursin("Info:", line) && startswith(line, flag) && length(l) == 11
+            push!(p, @SMatrix(
+                [
+                    parse(Float64, l[3]) parse(Float64, l[4]) parse(Float64, l[5]);
+                    parse(Float64, l[4]) parse(Float64, l[9]) parse(Float64, l[10]);
+                    parse(Float64, l[5]) parse(Float64, l[10]) parse(Float64, l[11])
+                ])
+                )
+        end
+    end
+
+    if p == []
+        throw(ArgumentError("The pressure flag was not recognized. Try `PRESSURE, `GPRESSURE`, `PRESSAVG` or `GPRESSAVG`."))
+    end
+
+    if last
+        return p[end]
+    else
+        return p
+    end
+
+end
