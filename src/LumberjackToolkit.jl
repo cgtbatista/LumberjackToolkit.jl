@@ -16,6 +16,7 @@ export vmd_get_charges
 
 export avg_densityprofile
 
+export CarbohydrateDihedrals
 export simulation_steps, dihedral_atoms, dihedral_indexes, dihedrals
 
 # Getting some properties profiles using the density distribution (e.g. electron density profile of POPC on the box)

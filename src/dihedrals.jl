@@ -1,8 +1,46 @@
-struct DihedralData
-    atom1::String
-    atom2::String
-    atom3::String
-    atom4::String
+struct CarbohydrateDihedrals
+    frame::Vector{Int64}
+    i::Vector{Int64}
+    j::Vector{Int64}
+    ϕ::Vector{Float64}
+    ψ::Vector{Float64}
+    sum_dihedrals::Vector{Float64}
+end
+
+function dihedral_atoms(dihedral::String, resnum::Int64; sep=" ")
+    
+    names, resnums = String[], Int64[]
+
+    atoms = String.(split(dihedral, sep))
+
+    for atom in atoms
+        if occursin("'", atom)
+            push!(names, replace(atom, "'" => ""))
+            push!(resnums, resnum)
+        else
+            push!(names, atom)
+            push!(resnums, resnum+1)
+        end
+    end
+
+    return names, resnums
+
+end
+
+function dihedral_indexes(atoms::Vector{PDBTools.Atom}, segname::String, resnum::Int64; dihedral="O5'-C1'-O4-C4", sep="-")
+    
+    indexes = Int64[]
+
+    names, resnums = dihedral_atoms(dihedral, resnum, sep=sep)
+
+    for (name, resnum) in zip(names, resnums)
+        idx = PDBTools.index.(
+                            PDBTools.select(atoms, atom -> (atom.segname == segname) && (atom.resnum == resnum) && (atom.name == name))
+                        )[1]
+        push!(indexes, idx)
+    end
+
+    return indexes    
 end
 
 """
@@ -26,44 +64,65 @@ function dihedral(atom1::SVector, atom2::SVector, atom3::SVector, atom4::SVector
 
 end
 
+"""
+   dihedrals(pdbname::String, trajectory::String, segname::String; ...)
+
+Calculate the dihedral angles and their sum based on the carbohydrate chain. The `pdbname` carries the atom information, and the `trajectory` holds the coordinates
+for each atoms in the simulation. The carbohydrate chain is defined by the `segname` parameter, that is the same segname present on PDB.
+
+Wohlert uses a lot the ϕ(O5'-C1'-O4-C4) and ψ(C1'-O4-C4-C3) definition, while Carol uses ϕ(O5'-C1'-O4-C4) and ψ(C1'-O4-C4-C5)
+"""
 function dihedrals(
                 pdbname::String, trajectory::String, segname::String;
-                first_resid=3, last_resid=98,
+                first_resid=3, last_resid=98, dihedral1="O5'-C1'-O4-C4", dihedral2="C1'-O4-C4-C3", sep="-",
                 first=1, last=nothing, step=1,
                 outfile=nothing
             )
 
+    println("")
     println(" ~~ Loading the simulation data...")
     simulation = MolSimToolkit.Simulation(
                             pdbname,
                             trajectory;
                             first=first, last=last, step=step
                         )
+    println("")
 
     println(" ~~ Picking all of the $segname atoms:")
     atoms = PDBTools.readPDB(pdbname, only = (atom -> atom.segname == segname))
+    println("")
     
     println(" ~~ Calculating the dihedrals associated to each residue pair:")
+    println("")
     
     if !isnothing(outfile)
         out = Base.open(outfile, "w")
+    else
+        f = Int64[]
+        index1 = Int64[]; index2 = Int64[]
+        angle1 = Float64[]; angle2 = Float64[]; sum_dihedrals = Float64[]
     end
 
     ## ith frame, monitored residue, monitored atom name, monitored segment name, reference atom name, reference segment name, minimum distance
     for frame in simulation
         
         i = simulation.frame_index
-        println("    frame $i")
-        println("")
-
-        coor = MolSimToolkit.positions(frame)
         
-        resid = first_resid
+        coor = MolSimToolkit.positions(frame)
 
+        println(raw"""
+
+        ~~~~ Frame""" * " $i " * raw"""~~~~
+
+        frame           i      j          ϕ          ψ      ϕ + ψ
+        ---------------------------------------------------------""")        
+
+        resid = first_resid
+        
         while resid < last_resid
             
             # getting the ϕ dihedral angle
-            ϕ_atoms = dihedral_indexes(atoms, segname, resid, dihedral="O5'-C1'-O4-C4", sep="-")
+            ϕ_atoms = dihedral_indexes(atoms, segname, resid, dihedral=dihedral1, sep=sep)
             ϕ = dihedral(
                     @SVector([ coor[ϕ_atoms[1]][1], coor[ϕ_atoms[1]][2], coor[ϕ_atoms[1]][3] ]),
                     @SVector([ coor[ϕ_atoms[2]][1], coor[ϕ_atoms[2]][2], coor[ϕ_atoms[2]][3] ]),
@@ -72,7 +131,7 @@ function dihedrals(
                 )
             
             # getting the ψ dihedral angle
-            ψ_atoms = dihedral_indexes(atoms, segname, resid, dihedral="C1'-O4-C4-C3", sep="-")
+            ψ_atoms = dihedral_indexes(atoms, segname, resid, dihedral=dihedral2, sep=sep)
             ψ = dihedral(
                     @SVector([ coor[ψ_atoms[1]][1], coor[ψ_atoms[1]][2], coor[ψ_atoms[1]][3] ]),
                     @SVector([ coor[ψ_atoms[2]][1], coor[ψ_atoms[2]][2], coor[ψ_atoms[2]][3] ]),
@@ -83,26 +142,22 @@ function dihedrals(
             ϕ = mod(ϕ, 360.0)
             ψ = mod(ψ, 360.0)
 
-            sum_angles = mod(ϕ+ψ, 360.0)
-
-            info = (
-                i,
-                resid,
-                resid+1,
-                ϕ,
-                ψ,
-                sum_angles
-            )
-            @printf("%d %d %d %.2f %.2f %.2f\n", info...)
-
+            info = (i, resid, resid+1, ϕ, ψ, ϕ+ψ)
+            @printf("%-10d %6d %6d %10.2f %10.2f %10.2f\n", info...)
 
             if !isnothing(outfile)
-                Base.write(out, "$i $resid $(resid+1) $ϕ $ψ $sum_angles\n")
+                Base.write(out, "$i $resid $(resid+1) $ϕ $ψ $(ϕ+ψ)\n")
+            else
+                push!(f, i)
+                push!(index1, resid); push!(index2, resid+1)
+                push!(angle1, ϕ); push!(angle2, ψ); push!(sum_dihedrals, ϕ+ψ)
             end
 
             resid += 1
 
         end
+
+        println("")
         
     end
 
@@ -112,121 +167,13 @@ function dihedrals(
 
     println("")
     println(" ~~ Done!")
-    
-    return nothing
 
-end
+    Base.GC.gc()
 
-function hemicellulose_dihedrals(pdbfile::String, trajectory::String, segment::String, first_xylan_residue::Int64, last_xylan_residue::Int64;
-    ffirst=1, flast=nothing, fstep=1)
-    ##
-    println(" ~~ Loading the PDB and TRAJECTORY information..."); println("")
-    simulation = MolSimToolkit.Simulation(pdbfile, trajectory; first=ffirst, last=flast, step=fstep)
-
-    println(" ~~ Calculating the shortest distances between the monitored atoms and the reference atoms:")
-    segment_atoms = PDBTools.readPDB(pdbfile, only = atom -> (
-        atom.segname == segment)
-    ); segment_resnums = resnum.(segment_atoms)
-    
-    println(" ~~ Calculating the dihedrals associated to each backbone residue pair:")
-
-    open("./dihedral_$(segment).dat", "w") do dat
-        ## ith frame, monitored residue, monitored atom name, monitored segment name, reference atom name, reference segment name, minimum distance
-        for frame in simulation
-            ith_frame = simulation.frame_index; println("    - frame $ith_frame")
-            coor = MolSimToolkit.positions(frame)
-            ## wrinting the output dat file
-            resid_token = first_xylan_residue
-            while resid_token < last_xylan_residue
-                # setting the dummies index variables
-                i = resid_token; j = resid_token + 1; resid_token = resid_token + 1
-                println("      ... for the residue pair $i and $j")
-                # getting the phi dihedral angle -- O5'-C1'-O4-C4
-                da1_atom1 = PDBTools.index.(select(segment_atoms, by = atom -> atom.segname == segment && atom.resnum == i && atom.name == "O5"))[1]
-                da1_atom2 = PDBTools.index.(select(segment_atoms, by = atom -> atom.segname == segment && atom.resnum == i && atom.name == "C1"))[1]
-                da1_atom3 = PDBTools.index.(select(segment_atoms, by = atom -> atom.segname == segment && atom.resnum == j && atom.name == "O4"))[1]
-                da1_atom4 = PDBTools.index.(select(segment_atoms, by = atom -> atom.segname == segment && atom.resnum == j && atom.name == "C4"))[1]
-                ϕ = dihedral(@SVector([ coor[da1_atom1][1], coor[da1_atom1][2], coor[da1_atom1][3] ]),
-                             @SVector([ coor[da1_atom2][1], coor[da1_atom2][2], coor[da1_atom2][3] ]),
-                             @SVector([ coor[da1_atom3][1], coor[da1_atom3][2], coor[da1_atom3][3] ]),
-                             @SVector([ coor[da1_atom4][1], coor[da1_atom4][2], coor[da1_atom4][3] ]))
-                # getting the psi dihedral angle -- C1'-O4-C4-C3
-                da2_atom1 = PDBTools.index.(select(segment_atoms, by = atom -> atom.segname == segment && atom.resnum == i && atom.name == "C1"))[1]
-                da2_atom2 = PDBTools.index.(select(segment_atoms, by = atom -> atom.segname == segment && atom.resnum == j && atom.name == "O4"))[1]
-                da2_atom3 = PDBTools.index.(select(segment_atoms, by = atom -> atom.segname == segment && atom.resnum == j && atom.name == "C4"))[1]
-                da2_atom4 = PDBTools.index.(select(segment_atoms, by = atom -> atom.segname == segment && atom.resnum == j && atom.name == "C3"))[1] 
-                ψ = dihedral(@SVector([ coor[da2_atom1][1], coor[da2_atom1][2], coor[da2_atom1][3] ]),
-                             @SVector([ coor[da2_atom2][1], coor[da2_atom2][2], coor[da2_atom2][3] ]),
-                             @SVector([ coor[da2_atom3][1], coor[da2_atom3][2], coor[da2_atom3][3] ]),
-                             @SVector([ coor[da2_atom4][1], coor[da2_atom4][2], coor[da2_atom4][3] ]))
-                # sum of the angles phi + psi
-                sum_angles = ϕ + ψ
-                if sum_angles > 360 && sum_angles < 720
-                    sum_angles = sum_angles - 360
-                elseif sum_angles > 720
-                    sum_angles = sum_angles - 720
-                end
-                write(dat, "$ith_frame $i $j $ϕ $ψ $sum_angles\n")
-            end
-            
-        end
-    end; println(""); println(" ~~ Done!"); return nothing
-
-end
-
-function hemicellulose_dihedrals2(pdbfile::String, trajectory::String, segment::String, first_xylan_residue::Int64, last_xylan_residue::Int64;
-    ffirst=1, flast=nothing, fstep=1)
-    ##
-    println(" ~~ Loading the PDB and TRAJECTORY information..."); println("")
-    simulation = MolSimToolkit.Simulation(pdbfile, trajectory; first=ffirst, last=flast, step=fstep)
-
-    println(" ~~ Calculating the shortest distances between the monitored atoms and the reference atoms:")
-    segment_atoms = PDBTools.readPDB(pdbfile, only = atom -> (
-        atom.segname == segment)
-    ); segment_resnums = resnum.(segment_atoms)
-    
-    println(" ~~ Calculating the dihedrals associated to each backbone residue pair:")
-
-    open("./dihedral2_$(segment).dat", "w") do dat
-        ## ith frame, monitored residue, monitored atom name, monitored segment name, reference atom name, reference segment name, minimum distance
-        for frame in simulation
-            ith_frame = simulation.frame_index; println("    - frame $ith_frame")
-            coor = MolSimToolkit.positions(frame)
-            ## wrinting the output dat file
-            resid_token = first_xylan_residue
-            while resid_token < last_xylan_residue
-                # setting the dummies index variables
-                i = resid_token; j = resid_token + 1; resid_token = resid_token + 1
-                println("      ... for the residue pair $i and $j")
-                # getting the phi dihedral angle -- O5'-C1'-O4-C4
-                da1_atom1 = PDBTools.index.(select(segment_atoms, by = atom -> atom.segname == segment && atom.resnum == i && atom.name == "O5"))[1]
-                da1_atom2 = PDBTools.index.(select(segment_atoms, by = atom -> atom.segname == segment && atom.resnum == i && atom.name == "C1"))[1]
-                da1_atom3 = PDBTools.index.(select(segment_atoms, by = atom -> atom.segname == segment && atom.resnum == j && atom.name == "O4"))[1]
-                da1_atom4 = PDBTools.index.(select(segment_atoms, by = atom -> atom.segname == segment && atom.resnum == j && atom.name == "C4"))[1]
-                ϕ = dihedral(@SVector([ coor[da1_atom1][1], coor[da1_atom1][2], coor[da1_atom1][3] ]),
-                             @SVector([ coor[da1_atom2][1], coor[da1_atom2][2], coor[da1_atom2][3] ]),
-                             @SVector([ coor[da1_atom3][1], coor[da1_atom3][2], coor[da1_atom3][3] ]),
-                             @SVector([ coor[da1_atom4][1], coor[da1_atom4][2], coor[da1_atom4][3] ]))
-                # getting the psi dihedral angle -- C1'-O4-C4-C5
-                da2_atom1 = PDBTools.index.(select(segment_atoms, by = atom -> atom.segname == segment && atom.resnum == i && atom.name == "C1"))[1]
-                da2_atom2 = PDBTools.index.(select(segment_atoms, by = atom -> atom.segname == segment && atom.resnum == j && atom.name == "O4"))[1]
-                da2_atom3 = PDBTools.index.(select(segment_atoms, by = atom -> atom.segname == segment && atom.resnum == j && atom.name == "C4"))[1]
-                da2_atom4 = PDBTools.index.(select(segment_atoms, by = atom -> atom.segname == segment && atom.resnum == j && atom.name == "C5"))[1] 
-                ψ = dihedral(@SVector([ coor[da2_atom1][1], coor[da2_atom1][2], coor[da2_atom1][3] ]),
-                             @SVector([ coor[da2_atom2][1], coor[da2_atom2][2], coor[da2_atom2][3] ]),
-                             @SVector([ coor[da2_atom3][1], coor[da2_atom3][2], coor[da2_atom3][3] ]),
-                             @SVector([ coor[da2_atom4][1], coor[da2_atom4][2], coor[da2_atom4][3] ]))
-                # sum of the angles phi + psi
-                sum_angles = ϕ + ψ
-                if sum_angles > 360 && sum_angles < 720
-                    sum_angles = sum_angles - 360
-                elseif sum_angles > 720
-                    sum_angles = sum_angles - 720
-                end
-                write(dat, "$ith_frame $i $j $ϕ $ψ $sum_angles\n")
-            end
-            
-        end
-    end; println(""); println(" ~~ Done!"); return nothing
+    if !isnothing(outfile)
+        return outfile
+    else
+        return CarbohydrateDihedrals(f, index1, index2, angle1, angle2, sum_dihedrals)
+    end
 
 end
