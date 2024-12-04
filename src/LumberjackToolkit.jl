@@ -18,7 +18,7 @@ export avg_densityprofile
 
 export CarbohydrateDihedrals
 export simulation_steps, dihedral_atoms, dihedral_indexes, dihedrals
-export get_pressure
+export get_pressure, get_energy
 
 # Getting some properties profiles using the density distribution (e.g. electron density profile of POPC on the box)
 include("./density.jl")

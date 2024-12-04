@@ -84,3 +84,53 @@ function get_pressure(logfile::Vector{SubString{String}}; flag="PRESSURE", unit=
     end
 
 end
+
+
+function get_energy(logname::String; property="TEMP", last=true)
+    return get_energy(split(Base.read(logname, String), "\n"); property=property, last=last)
+end
+
+function get_energy(logfile::Vector{SubString{String}}; property="TEMP", last=true)
+
+    E = Vector{Float64}()
+
+    idx = 13
+    idx = lowercase(property) == "bond" ? 3 : idx
+    idx = lowercase(property) == "angle" ? 4 : idx
+    idx = lowercase(property) == "dihed" ? 5 : idx
+    idx = lowercase(property) == "imprp" ? 6 : idx
+    idx = lowercase(property) == "elect" ? 7 : idx
+    idx = lowercase(property) == "vdw" ? 8 : idx
+    idx = lowercase(property) == "boundary" ? 9 : idx
+    idx = lowercase(property) == "misc" ? 10 : idx
+    idx = lowercase(property) == "kinetic" ? 11 : idx
+    idx = lowercase(property) == "total" ? 12 : idx
+    idx = lowercase(property) == "temp" ? 13 : idx
+    idx = lowercase(property) == "potential" ? 14 : idx
+    idx = lowercase(property) == "totalavg" ? 15 : idx
+    idx = lowercase(property) == "tempavg" ? 16 : idx
+    idx = lowercase(property) == "pressure" ? 17 : idx
+    idx = lowercase(property) == "gpressure" ? 18 : idx
+    idx = lowercase(property) == "volume" ? 19 : idx
+    idx = lowercase(property) == "pressavg" ? 20 : idx
+    idx = lowercase(property) == "gpressavg" ? 21 : idx
+
+    for line in logfile
+        l = split(line)
+
+        if !occursin("Info:", line) && startswith(line, "ENERGY:")
+            push!(E, parse(Float64, l[idx]))
+        end
+    end
+
+    if E == []
+        throw(ArgumentError("The energy flag was not recognized. Try..."))
+    end
+
+    if last
+        return E[end]
+    else
+        return E[begin+1:end]
+    end
+
+end
