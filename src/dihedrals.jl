@@ -7,10 +7,10 @@ struct CarbohydrateDihedrals
     sum_dihedrals::Vector{Float64}
 end
 
+
 function dihedral_atoms(dihedral::String, resnum::Int64; sep=" ")
     
     names, resnums = String[], Int64[]
-
     atoms = String.(split(dihedral, sep))
 
     for atom in atoms
@@ -24,13 +24,12 @@ function dihedral_atoms(dihedral::String, resnum::Int64; sep=" ")
     end
 
     return names, resnums
-
 end
+
 
 function dihedral_indexes(atoms::Vector{PDBTools.Atom}, segname::String, resnum::Int64; dihedral="O5'-C1'-O4-C4", sep="-")
     
     indexes = Int64[]
-
     names, resnums = dihedral_atoms(dihedral, resnum, sep=sep)
 
     for (name, resnum) in zip(names, resnums)
@@ -43,6 +42,7 @@ function dihedral_indexes(atoms::Vector{PDBTools.Atom}, segname::String, resnum:
     return indexes    
 end
 
+
 """
     dihedral(atom1::StaticArrays.SVector, atom2::StaticArrays.SVector, atom3::StaticArrays.SVector, atom4::StaticArrays.SVector)
 
@@ -51,8 +51,7 @@ and (atom2, atom3, atom4). The dihedral angle is calculated using the atan metho
 """
 function dihedral(atom1::SVector, atom2::SVector, atom3::SVector, atom4::SVector)
     
-    v1, v2, v3 = atom2 - atom1, atom3 - atom2, atom4 - atom3
-    
+    v1, v2, v3 = atom2 - atom1, atom3 - atom2, atom4 - atom3    
     w1, w2 = cross(v1, v2), cross(v2, v3)
     
     dihedral = atand(
@@ -61,8 +60,8 @@ function dihedral(atom1::SVector, atom2::SVector, atom3::SVector, atom4::SVector
             )
     
     return mod(dihedral, 360.0)
-
 end
+
 
 """
    dihedrals(pdbname::String, trajectory::String, segname::String; ...)
