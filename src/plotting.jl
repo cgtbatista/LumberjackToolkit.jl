@@ -396,3 +396,31 @@ function rtime_plot(files::Vector{String}; timelength = 10, md_time="ns", output
     #    )
 
 end
+
+
+
+function plotting_pmf(pmf::Matrix{Float64}; type="heatmap", ϕ=0:10:360, ψ=0:10:360, levels=7, color=:plasma, legend=:none, output_filename="pmf.png")
+
+    if type == "heatmap"
+        
+        Plots.heatmap(ϕ, ψ, pmf', color=color, title="PMF", legend=legend, clims=(minimum(pmf), maximum(pmf)))
+        Plots.heatmap!(xlabel="ϕ (degrees)", ylabel="ψ (degrees)")
+        Plots.heatmap!(size=(800,600))        
+
+    elseif type == "contour"
+
+        new_ϕ = ϕ[1:end-1] .+ diff(ϕ) ./ 2
+        new_ψ = ψ[1:end-1] .+ diff(ψ) ./ 2
+
+        Plots.contourf(new_ϕ, new_ψ, pmf', levels=levels, color=color, title="PMF", legend=legend, lw=0.5)
+        Plots.contourf!(xlabel="ϕ (degrees)", ylabel="ψ (degrees)")
+        Plots.contourf!(size=(800,600))
+
+    else
+        throw(ArgumentError("Invalid type of plot: $type. Try to use 'heatmap' or 'contour'"))
+    end
+
+    Plots.savefig(output_filename)
+
+    return output_filename
+end

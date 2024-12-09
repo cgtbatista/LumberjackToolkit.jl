@@ -20,6 +20,10 @@ export CarbohydrateDihedrals
 export simulation_steps, dihedral_atoms, dihedral_indexes, dihedrals
 export get_pressure, get_energy
 
+export WHAM
+
+export plotting_pmf
+
 # Getting some properties profiles using the density distribution (e.g. electron density profile of POPC on the box)
 include("./density.jl")
 include("./dihedrals.jl")
@@ -29,5 +33,7 @@ include("./plotting.jl")
 include("./vmd-scripts.jl")
 
 include("./utils.jl")
+
+include("./PMF.jl")
 
 end
