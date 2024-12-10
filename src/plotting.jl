@@ -398,23 +398,80 @@ function rtime_plot(files::Vector{String}; timelength = 10, md_time="ns", output
 end
 
 
+function pmf1D(
+                pmf::Vector{Float64}; coord=0:20:360,
+                xaxis=0:60:360, title="PMF at kcal/mol", xlabel="ϕ (degrees)", ylabel="Potential of Mean Force",
+                color=:blue, legend=:none, size=(800,600),
+                output_filename=nothing
+            )
 
-function plotting_pmf(pmf::Matrix{Float64}; type="heatmap", ϕ=0:10:360, ψ=0:10:360, levels=7, color=:plasma, legend=:none, output_filename="pmf.png")
+    output_filename = isnothing(output_filename) ? tempname() * ".png" : output_filename
+
+    new_coord = coord[1:end-1] .+ diff(coord) ./ 2
+
+    Plots.scatter(new_coord, pmf, color=color, title=title, legend=legend)
+    Plots.scatter!(
+            xlabel=xlabel, xlims=(xaxis[begin], xaxis[end]), xticks=xaxis,
+            ylabel=ylabel
+        )
+    Plots.scatter!(
+                frame=:box, grid=false,
+                tickfontsize=12, legendfontsize=12, guidefontsize=12,
+                thickness_scaling=1.5
+            )
+    Plots.scatter!(size=size)
+
+    Plots.savefig(output_filename)
+
+    return output_filename
+end
+
+
+function pmf2D(
+                pmf::Matrix{Float64}; type="heatmap", coord1=0:20:360, coord2=0:20:360,
+                xaxis=0:60:360, yaxis=0:60:360, title="PMF at kcal/mol", xlabel="ϕ (degrees)", ylabel="ψ (degrees)",
+                levels=5, lw=2.0, color=:plasma, color2=[:black], cbar=true, clabels=true, legend=:none, size=(800,600),
+                output_filename=nothing
+            )
+
+    output_filename = isnothing(output_filename) ? tempname() * ".png" : output_filename
 
     if type == "heatmap"
         
-        Plots.heatmap(ϕ, ψ, pmf', color=color, title="PMF", legend=legend, clims=(minimum(pmf), maximum(pmf)))
-        Plots.heatmap!(xlabel="ϕ (degrees)", ylabel="ψ (degrees)")
-        Plots.heatmap!(size=(800,600))        
+        maxpmf = maximum(pmf[.!isnan.(pmf)])
+        minpmf = minimum(pmf[.!isnan.(pmf)])
+
+        Plots.heatmap(coord1, coord2, pmf', color=color, title=title, legend=legend, clims=(minpmf, maxpmf))
+        Plots.heatmap!(
+                xlabel=xlabel, xlims=(xaxis[begin], xaxis[end]), xticks=xaxis,
+                ylabel=ylabel, ylims=(yaxis[begin], yaxis[end]), yticks=yaxis
+            )
+        Plots.heatmap!(
+                frame=:box, grid=false,
+                tickfontsize=12, legendfontsize=12, guidefontsize=12,
+                thickness_scaling=1.5
+            )
+        Plots.heatmap!(size=size) 
 
     elseif type == "contour"
 
-        new_ϕ = ϕ[1:end-1] .+ diff(ϕ) ./ 2
-        new_ψ = ψ[1:end-1] .+ diff(ψ) ./ 2
+        new_coord1 = coord1[1:end-1] .+ diff(coord1) ./ 2
+        new_coord2 = coord2[1:end-1] .+ diff(coord2) ./ 2
 
-        Plots.contourf(new_ϕ, new_ψ, pmf', levels=levels, color=color, title="PMF", legend=legend, lw=0.5)
-        Plots.contourf!(xlabel="ϕ (degrees)", ylabel="ψ (degrees)")
-        Plots.contourf!(size=(800,600))
+        Plots.contourf(
+                new_coord1, new_coord2, pmf', levels=levels, color=color, title=title, legend=legend, cbar=cbar, clabels=clabels,
+                lw=lw, lc=color2
+            )
+        Plots.contourf!(
+                xlabel=xlabel, xlims=(xaxis[begin], xaxis[end]), xticks=xaxis,
+                ylabel=ylabel, ylims=(yaxis[begin], yaxis[end]), yticks=yaxis
+            )
+        Plots.contourf!(
+                frame=:box, grid=false,
+                tickfontsize=12, legendfontsize=12, guidefontsize=12,
+                thickness_scaling=1.5
+            )
+        Plots.contour!(size=size)
 
     else
         throw(ArgumentError("Invalid type of plot: $type. Try to use 'heatmap' or 'contour'"))

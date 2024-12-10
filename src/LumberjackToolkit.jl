@@ -22,7 +22,7 @@ export get_pressure, get_energy
 
 export WHAM
 
-export plotting_pmf
+export pmf1D, pmf2D
 
 # Getting some properties profiles using the density distribution (e.g. electron density profile of POPC on the box)
 include("./density.jl")
