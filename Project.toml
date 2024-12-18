@@ -4,6 +4,7 @@ authors = ["cgtbatista <c203748@dac.unicamp.br> and contributors"]
 version = "1.0.0-DEV"
 
 [deps]
+DelimitedFiles = "8bb1440f-4735-579b-a4ab-409b98df4dab"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 MolSimToolkit = "054db54f-6694-444d-9bbb-e9ecdbfe77be"
 PDBTools = "e29189f1-7114-4dbd-93d0-c5673a921a58"
@@ -15,6 +16,7 @@ StatsPlots = "f3b207a7-027a-5e70-b257-86293d7955fd"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [compat]
+DelimitedFiles = "1.9"
 LinearAlgebra = "1.10"
 MolSimToolkit = "1.22"
 PDBTools = "1.8.1"

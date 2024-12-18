@@ -23,38 +23,58 @@ end
 
 ## RMSD
 
-function rmsd_plot(rmsd_data::String; timestep=1, md_time="ns", output_filename="rmsdplot.png")
-    # Load data
-    all_data = readdlm(rmsd_data)
-    simulation_time = collect(0:size(all_data)[1]) * timestep; rmsd = [ 0.0; all_data[:,1] ]
-    # Plot
-    data_label=split(rmsd_data, ".")
-    Plots.plot(simulation_time, rmsd, label=data_label[1], linewidth=2)
-    Plots.plot!(xlabel="MD simulation time ($md_time)", ylabel="RMSD")
-    Plots.plot!(xlim=(minimum(simulation_time), maximum(simulation_time)+60), ylim=(minimum(rmsd), maximum(rmsd)+5))
-    Plots.plot!(size=(800, 600))
+function rmsd_plot(inputfile::String; timestep=1, t_max=400, xlabel="Time (ns)", ylim=(0, 10), label="cellulose", color="black", outputfile=nothing)
     
-    Plots.savefig(output_filename)
-end
+    outputfile = isnothing(outputfile) ? tempname() * ".png" : outputfile
+    
+    t = collect(0:timestep:t_max)
 
-function rmsd_plot(files::Vector{String}; timestep=1, md_time="ns", output_filename="rmsdplot.png")
-    
-    Plots.plot(xlabel="MD simulation time ($md_time)", ylabel="RMSD", legend=:bottomright)
-    Plots.plot!(xlims=(Inf, -Inf), ylims=(Inf, -Inf))
-    Plots.plot!(size=(800, 600))
-    
-    for file in files
-        all_data = readdlm(file)
-        simulation_time = collect(0:size(all_data)[1]) * timestep
-        rmsd = [0.0; all_data[:, 1]]
-        
-        data_label = split(file, ".")[1]
-        
-        Plots.plot!(simulation_time, rmsd, label=data_label, linewidth=2)
-        Plots.plot!(xlims=(minimum(simulation_time), maximum(simulation_time) + 60), ylims=(minimum(rmsd), maximum(rmsd) + 5))
+    rmsd = readdlm(inputfile)[Base.OneTo(t_max+1),1]
+
+    if length(t) != length(rmsd)
+        throw(ArgumentError("The time vector must have the same length of the RMSD vector."))
     end
     
-    Plots.savefig("full_$output_filename")
+    Plots.plot(t, rmsd, label=label, color=color, linewidth=2)
+    Plots.plot!(xlabel=xlabel, ylabel="\n RMSD (Å)")
+    Plots.plot!(frame=:box, grid=false)
+    Plots.plot!(xlim=(t[begin], t[end]), ylim=ylim)
+    Plots.plot!(size=(1000, 800))
+    Plots.savefig(outputfile)
+
+    return outputfile
+end
+## preto, vermelho, azul e verde
+
+function rmsd_plot(inputfiles::Vector{String}; timestep=1, t_max=400, xlabel="Time (ns)", ylim=(0, 10), label=nothing, color=nothing, outputfile=nothing)
+    
+    outputfile = isnothing(outputfile) ? tempname() * ".png" : outputfile
+    
+    t = collect(0:timestep:t_max)
+
+    Plots.gr()
+
+    Plots.plot(xlabel=xlabel, ylabel="RMSD (Å)", legend=:topright)
+    Plots.plot!(frame=:box, framestyle=:box, grid=false, tickfontsize=12, legendfontsize=12, guidefontsize=12, thickness_scaling=2)
+    Plots.plot!(topmargin=0.5Plots.Measures.cm, rightmargin=0.5Plots.Measures.cm, bottommargin=-0.5Plots.Measures.cm, leftmargin=-0.5Plots.Measures.cm)
+    Plots.plot!(xlim=(t[begin], t[end]), ylim=ylim)
+    
+    for input in enumerate(inputfiles)
+        
+        i, file = input[1], input[2]
+
+        rmsd = readdlm(file)[Base.OneTo(t_max+1),1]
+        
+        tmp_label = isnothing(label) ? "$i" : label[i]
+        tmp_color = isnothing(color) ? "black" : color[i]
+
+        Plots.plot!(t, rmsd, label=tmp_label, color=tmp_color, linewidth=2)
+    end
+
+    Plots.plot!(size=(1200, 800), dpi=900)
+    Plots.savefig(outputfile)
+
+    return outputfile
 end
 
 ## PLOT BY RESIDS

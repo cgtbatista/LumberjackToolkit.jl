@@ -5,10 +5,15 @@ import MolSimToolkit
 import Statistics
 import StatsPlots, Plots
 
+import DelimitedFiles: readdlm
 import Printf: @sprintf, @printf
 import StaticArrays: @SVector, SVector, SMatrix, @SMatrix
 import LinearAlgebra: norm, dot, cross, diag
 
+## RMSD
+export rmsd_plot
+
+## Density profiles
 export densityprofile
 export ρ, δ
 export averaging_profile, average_bins, binning, _ordering_symmetry, _correct_center, _correct_symmetry, _get_reference
@@ -24,6 +29,8 @@ export WHAM
 
 export pmf1D, pmf2D
 
+export center_protein, pbc
+
 # Getting some properties profiles using the density distribution (e.g. electron density profile of POPC on the box)
 include("./density.jl")
 include("./dihedrals.jl")
@@ -35,5 +42,7 @@ include("./vmd-scripts.jl")
 include("./utils.jl")
 
 include("./PMF.jl")
+
+include("./pbc.jl")
 
 end
