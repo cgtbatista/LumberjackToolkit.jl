@@ -134,3 +134,45 @@ function get_energy(logfile::Vector{SubString{String}}; property="TEMP", last=tr
     end
 
 end
+
+
+function center_of_mass(pdbname::String, trajectory::String; selection="all", first=1, last=nothing, step=1)
+    
+    return center_of_mass(MolSimToolkit.Simulation(
+                                    pdbname,
+                                    trajectory;
+                                    first=first, last=last, step=step
+                                ), selection=selection)
+end
+
+function center_of_mass(simulation::MolSimToolkit.Simulation; selection="all")
+    
+    com = Vector{MolSimToolkit.Point3D}()
+
+    idxs = PDBTools.selindex(MolSimToolkit.atoms(simulation), selection)
+
+    for frame in simulation
+        coor = MolSimToolkit.positions(frame)
+        push!(com, MolSimToolkit.center_of_mass(idxs, simulation, coor))
+    end
+
+    return com
+end
+
+function rmsd(pdbname::String, trajectory::String; selection="all", mass=nothing, reference_frame=nothing, show_progress=false, first=1, last=nothing, step=1)
+    
+    return rmsd(MolSimToolkit.Simulation(
+                        pdbname,
+                        trajectory;
+                        first=first, last=last, step=step
+                    ), selection=selection, mass=mass, reference_frame=reference_frame, show_progress=show_progress)
+end
+
+function rmsd(simulation::MolSimToolkit.Simulation; selection="all", mass=nothing, reference_frame=nothing, show_progress=false)
+    
+    return MolSimToolkit.rmsd(
+                    simulation,
+                    PDBTools.selindex(MolSimToolkit.atoms(simulation), selection);
+                    mass=mass, reference_frame=reference_frame, show_progress=show_progress
+                )
+end

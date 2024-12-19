@@ -29,7 +29,8 @@ export WHAM
 
 export pmf1D, pmf2D
 
-export center_protein, pbc
+export align_trajectory, center_trajectory, namd_pbc
+export center_of_mass, rmsd
 
 # Getting some properties profiles using the density distribution (e.g. electron density profile of POPC on the box)
 include("./density.jl")
