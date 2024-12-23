@@ -5,6 +5,7 @@ import MolSimToolkit
 import Statistics
 import StatsPlots, Plots
 
+import MDLovoFit_jll: mdlovofit
 import DelimitedFiles: readdlm
 import Printf: @sprintf, @printf
 import StaticArrays: @SVector, SVector, SMatrix, @SMatrix
@@ -29,8 +30,10 @@ export WHAM
 
 export pmf1D, pmf2D
 
-export align_trajectory, center_trajectory, namd_pbc
+export align_trajectory, namd_pbc
 export center_of_mass, rmsd
+
+export write_frame!, writepdb_trajectory, lovo_mapping, lovo_fitting
 
 # Getting some properties profiles using the density distribution (e.g. electron density profile of POPC on the box)
 include("./density.jl")
@@ -44,6 +47,8 @@ include("./utils.jl")
 
 include("./PMF.jl")
 
-include("./pbc.jl")
+include("./align.jl")
+
+include("./misc-namd.jl")
 
 end

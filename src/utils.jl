@@ -51,91 +51,6 @@ function simulation_steps(t_simulation::Int64; unit="ns", timestep=2.0, output=1
 
 end
 
-function get_pressure(logname::String; flag="PRESSURE", unit="bar", last=true)
-    return get_pressure(split(Base.read(logname, String), "\n"); flag=flag, unit=unit, last=last)
-end
-
-function get_pressure(logfile::Vector{SubString{String}}; flag="PRESSURE", unit="bar", last=true)
-
-    p = Vector{SMatrix}()
-
-    for line in logfile
-        l = split(line)
-
-        if !occursin("Info:", line) && startswith(line, flag) && length(l) == 11
-            push!(p, @SMatrix(
-                [
-                    parse(Float64, l[3]) parse(Float64, l[4]) parse(Float64, l[5]);
-                    parse(Float64, l[4]) parse(Float64, l[9]) parse(Float64, l[10]);
-                    parse(Float64, l[5]) parse(Float64, l[10]) parse(Float64, l[11])
-                ])
-                )
-        end
-    end
-
-    if p == []
-        throw(ArgumentError("The pressure flag was not recognized. Try `PRESSURE, `GPRESSURE`, `PRESSAVG` or `GPRESSAVG`."))
-    end
-
-    if last
-        return p[end]
-    else
-        return p
-    end
-
-end
-
-
-function get_energy(logname::String; property="TEMP", last=true)
-    return get_energy(split(Base.read(logname, String), "\n"); property=property, last=last)
-end
-
-function get_energy(logfile::Vector{SubString{String}}; property="TEMP", last=true)
-
-    E = Vector{Float64}()
-
-    idx = 13
-    idx = lowercase(property) == "bond" ? 3 : idx
-    idx = lowercase(property) == "angle" ? 4 : idx
-    idx = lowercase(property) == "dihed" ? 5 : idx
-    idx = lowercase(property) == "imprp" ? 6 : idx
-    idx = lowercase(property) == "elect" ? 7 : idx
-    idx = lowercase(property) == "vdw" ? 8 : idx
-    idx = lowercase(property) == "boundary" ? 9 : idx
-    idx = lowercase(property) == "misc" ? 10 : idx
-    idx = lowercase(property) == "kinetic" ? 11 : idx
-    idx = lowercase(property) == "total" ? 12 : idx
-    idx = lowercase(property) == "temp" ? 13 : idx
-    idx = lowercase(property) == "potential" ? 14 : idx
-    idx = lowercase(property) == "totalavg" ? 15 : idx
-    idx = lowercase(property) == "tempavg" ? 16 : idx
-    idx = lowercase(property) == "pressure" ? 17 : idx
-    idx = lowercase(property) == "gpressure" ? 18 : idx
-    idx = lowercase(property) == "volume" ? 19 : idx
-    idx = lowercase(property) == "pressavg" ? 20 : idx
-    idx = lowercase(property) == "gpressavg" ? 21 : idx
-
-    for line in logfile
-        l = split(line)
-
-        if !occursin("Info:", line) && startswith(line, "ENERGY:")
-            push!(E, parse(Float64, l[idx]))
-        end
-    end
-
-    if E == []
-        throw(ArgumentError("The energy flag was not recognized. Try..."))
-    end
-
-    if last
-        return E[end]
-    else
-        return E[begin+1:end]
-    end
-
-end
-
-
 function center_of_mass(pdbname::String, trajectory::String; selection="all", first=1, last=nothing, step=1)
     
     return center_of_mass(MolSimToolkit.Simulation(
@@ -175,4 +90,59 @@ function rmsd(simulation::MolSimToolkit.Simulation; selection="all", mass=nothin
                     PDBTools.selindex(MolSimToolkit.atoms(simulation), selection);
                     mass=mass, reference_frame=reference_frame, show_progress=show_progress
                 )
+end
+
+"""
+    writepdb_trajectory(pdbname::String, trajectory::String; selection="all", first=1, last=nothing, step=1)
+
+Write a trajectory in a temporary PDB file. This is very useful when you want to visualize the edited trajectory in VMD.
+The MDLovoFit program uses this function to write the trajectory in a PDB file before the analysis.
+"""
+function writepdb_trajectory(
+                        pdbname::String,
+                        trajectory::String;
+                        selection="all",
+                        first=1, last=nothing, step=1
+                    )
+
+    atoms = PDBTools.readPDB(pdbname, selection)
+    simulation = MolSimToolkit.Simulation(atoms, trajectory, first=first, last=last, step=step)
+    
+    tempPDB = tempname() * ".pdb"
+    
+    io = Base.open(tempPDB, "w")
+    for frame in simulation
+        write_frame!(io, atoms, frame)
+    end
+    Base.close(io)
+
+    return tempPDB
+end
+
+"""
+    write_frame!(trajectory_pdb_file, atoms, frame
+
+Write a frame of a trajectory in the temporary PDB trajectory file.
+"""
+function write_frame!(pdbfile::IO, atoms::AbstractVector{<:PDBTools.Atom}, frame::MolSimToolkit.Chemfiles.Frame) 
+    
+    idx_map = Dict(atom.index => idx for (idx, atom) in enumerate(atoms))
+    coor = MolSimToolkit.positions(frame)
+
+    for (i,xyz) in enumerate(coor)
+        
+        idx = get(idx_map, i, nothing)
+
+        if !isnothing(idx)
+           atoms[idx].x = xyz[1]
+           atoms[idx].y = xyz[2]
+           atoms[idx].z = xyz[3]
+           Base.write(pdbfile, PDBTools.write_pdb_atom(atoms[idx]) * "\n")
+        end
+
+    end
+
+    Base.write(pdbfile, "ENDMDL\n")
+
+    return nothing
 end
