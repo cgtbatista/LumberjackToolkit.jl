@@ -120,6 +120,32 @@ function writepdb_trajectory(
 end
 
 """
+"""
+function readpdb_coordinates(atoms::AbstractVector{<:PDBTools.Atom}, pdbname::String)
+
+    frames = Vector{Vector{SVector{3, Float64}}}()
+    frame = Vector{SVector{3, Float64}}(undef, length(atoms))
+
+    file = Base.open(pdbname, "r")
+
+    idx = 1
+    for line in eachline(file)
+        if startswith(line, "ATOM") || startswith(line, "HETATM")
+            atom = PDBTools.read_atom_pdb(line)
+            frame[idx] = @SVector(Float64[atom.x, atom.y, atom.z])
+            idx += 1
+        end        
+        if startswith(line, "END")
+            push!(frames, deepcopy(frame))
+            idx = 1
+        end
+    end
+    Base.close(file)
+
+    return frames
+end
+
+"""
     write_frame!(trajectory_pdb_file, atoms, frame
 
 Write a frame of a trajectory in the temporary PDB trajectory file.
@@ -145,4 +171,56 @@ function write_frame!(pdbfile::IO, atoms::AbstractVector{<:PDBTools.Atom}, frame
     Base.write(pdbfile, "ENDMDL\n")
 
     return nothing
+end
+
+function pdb2trajectory(pdbname::String; trajectory=nothing, vmd="vmd", format="dcd", DebugVMD=false)
+    
+    trajectory = isnothing(trajectory) ? tempname() * "." * format : trajectory
+
+    tcl = tempname() * ".tcl"
+
+    vmdinput = Base.open(tcl, "w")
+    
+    Base.write(vmdinput,"""
+        mol new     $pdbname
+        
+        animate goto 0
+        animate write $format $trajectory
+        """
+        )
+
+    Base.close(vmdinput)
+
+    vmdoutput = split(Base.read(`$vmd -dispdev text -e $tcl`, String), "\n")
+
+    if DebugVMD
+        return vmdoutput, tcl
+    else
+        return trajectory
+    end
+end
+
+function frame_coordinates(
+                    pdbname::String,
+                    trajectory::String;
+                    selection="protein and name CA",
+                )                
+    
+    atoms = PDBTools.readPDB(pdbname, selection)
+
+    simulation = MolSimToolkit.Simulation(atoms, trajectory)
+
+    ##coor = zeros(SVector{length(atoms), MolSimToolkit.Point3D{Float64}}, length(simulation.frame_range))
+    coor = []
+
+    for (i,frame) in enumerate(simulation)
+        push!(coor, MolSimToolkit.positions(frame))
+    end
+
+    return coor
+    
+end
+
+function get_mass(pdbname::String; selection="protein and name CA")
+    return PDBTools.mass.(PDBTools.readPDB(pdbname, selection))
 end

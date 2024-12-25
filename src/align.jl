@@ -21,8 +21,7 @@ function align_trajectory(
                     psfname::String,
                     pdbname::String,
                     trajectory::String;
-                    selection="protein", pbc_dimensions=nothing, new_trajectory=nothing,
-                    reference=0, vmd="vmd", DebugVMD=false
+                    selection="protein and name CA", pbc_dimensions=nothing, new_trajectory=nothing, reference=0, vmd="vmd", DebugVMD=false
                 )
     
     new_trajectory = isnothing(new_trajectory) ? tempname() * ".dcd" : new_trajectory
@@ -40,42 +39,30 @@ function align_trajectory(
 
     vmdinput = Base.open(tcl, "w")
     
-    Base.write(vmdinput,
-        raw"""
+    Base.write(vmdinput,"""
         package require pbctools
 
-        mol new""" * " $psfname " * raw"""
-
-        mol addfile""" * " $pdbname " * raw"""
-
-        mol addfile""" * " $trajectory waitfor all" * raw"""
-
+        mol new     $psfname
+        mol addfile $pdbname
+        mol addfile $trajectory waitfor all
         
         animate goto 0
-
-        """ * "$pbc_dimensions" * raw"""
-
-        pbc wrap -centersel""" * " \"$selection\" -center com -compound residue -all" * raw"""
+        $pbc_dimensions
+        pbc wrap -centersel \"$selection\" -center com -compound residue -all
         
-
-        set ref_frame """ * "$reference" * raw"""
-
-        set ref_selection [atomselect top """ * "\"$selection\" frame \$ref_frame]" * raw"""
-
+        set ref_frame $reference
+        set ref_selection [atomselect top \"$selection\" frame \$ref_frame]
 
         set num_frames [molinfo top get numframes]
-        for {set i 0} {$i < $num_frames} {incr i} {
-            
-            set cur_selection [atomselect top """ * "\"$selection\" frame \$i]" * raw"""
 
-
-            set mat_trans [measure fit $cur_selection $ref_selection]
-
-            set sel_all [atomselect top "all" frame $i]
-            $sel_all move $mat_trans
+        for {set i 0} {\$i < \$num_frames} {incr i} {
+            set cur_selection [atomselect top \"$selection\" frame \$i]
+            set mat_trans [measure fit \$cur_selection \$ref_selection]
+            set sel_all [atomselect top "all" frame \$i]
+            \$sel_all move \$mat_trans
         }
 
-        animate write dcd""" * " $new_trajectory" * raw"""
+        animate write dcd $new_trajectory
         """
         )
 
@@ -99,9 +86,7 @@ function lovo_mapping(
                     pdbname::String, 
                     trajectory::String;
                     selection="protein and name CA",
-                    first=1,
-                    last=nothing,
-                    step=1,
+                    first=1, last=nothing, step=1
                 )
 
     tmp_trajectory = writepdb_trajectory(pdbname, trajectory; selection=selection, first=first, last=last, step=step)
@@ -116,7 +101,7 @@ function lovo_mapping(
     range = 1:findlast(<(1), data[:,1])
     fraction, RMSDl, RMSDh, RMSD = data[range,1], data[range,2], data[range,3], data[range,4]
 
-    println(chomp("""
+    println("""
     -----------------
     Mapping Fractions
     -----------------
@@ -128,7 +113,7 @@ function lovo_mapping(
     RMSDl   : contains the RMSD of the fraction of the structure with the lowest RMSD. The best aligned!
     RMSDh   : contains the RMSD of the fraction not considered for the alignment.
     RMSD    : contains the RMSD of the whole structure.
-    """))
+    """)
 
     return fraction, RMSDl, RMSDh, RMSD
 end
@@ -139,7 +124,7 @@ function lovo_fitting(
                     pdbname::String, 
                     trajectory::String,
                     fraction::AbstractFloat;
-                    selection="protein and name CA", alignedPDB=nothing, atoms2consider=nothing, iref=1,
+                    selection="protein and name CA", alignedPDB=nothing, atoms2consider=nothing, reference=1,
                     first=1, last=nothing, step=1
                 )
     
@@ -171,7 +156,7 @@ function lovo_fitting(
     
     try
         mdlovofit() do exe
-            run(pipeline(`$exe -f $fraction -iref $iref -rmsf $rmsf_output -t $alignedPDB $tmp_trajectory`; stdout=fitting_output))
+            run(pipeline(`$exe -f $fraction -iref $reference -rmsf $rmsf_output -t $alignedPDB $tmp_trajectory`; stdout=fitting_output))
         end
     catch 
         "ERROR in MDLovoFit execution"
@@ -183,18 +168,18 @@ function lovo_fitting(
     RMSDl, RMSDh, RMSD = data[:,2], data[:,3], data[:,4]
     RMSF = readdlm(rmsf_output; comments=true, comment_char='#')[:,2]
 
-    println(chomp("""
+    println("""
     ------------
     LOVO Fitting
     ------------
     $alignedPDB
 
-    Average RMSD of all atoms: $(round((Statistics.mean(RMSD)), digits=2))
-    Average RMSD of the $(round(100*fraction,digits=1))% atoms of lowest RMSD: $(round((Statistics.mean(RMSDl)), digits=2))
-    Average RMSD of the $(round(100*(1-fraction),digits=1))% atoms of highest RMSD: $(round((Statistics.mean(RMSDh)), digits=2))
+    Average RMSD of all atoms: $(round((mean(RMSD)), digits=2))
+    Average RMSD of the $(round(100*fraction,digits=1))% atoms of lowest RMSD: $(round((mean(RMSDl)), digits=2))
+    Average RMSD of the $(round(100*(1-fraction),digits=1))% atoms of highest RMSD: $(round((mean(RMSDh)), digits=2))
 
     RMSF data is based on $(length(RMSF)) atoms.
-    """))
+    """)
 
     return RMSDl, RMSDh, RMSD, RMSF
 end

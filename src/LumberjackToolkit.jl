@@ -2,14 +2,14 @@ module LumberjackToolkit
 
 import PDBTools
 import MolSimToolkit
-import Statistics
 import StatsPlots, Plots
 
 import MDLovoFit_jll: mdlovofit
 import DelimitedFiles: readdlm
 import Printf: @sprintf, @printf
-import StaticArrays: @SVector, SVector, SMatrix, @SMatrix
-import LinearAlgebra: norm, dot, cross, diag
+import StaticArrays: @SVector, SVector, SMatrix, @SMatrix, MArray
+import Statistics: mean
+import LinearAlgebra: norm, dot, cross, diag, eigen
 
 ## RMSD
 export rmsd_plot
@@ -24,7 +24,7 @@ export avg_densityprofile
 
 export CarbohydrateDihedrals
 export simulation_steps, dihedral_atoms, dihedral_indexes, dihedrals
-export get_pressure, get_energy
+export get_pressure, get_energy, get_mass
 
 export WHAM
 
@@ -34,6 +34,11 @@ export align_trajectory, namd_pbc
 export center_of_mass, rmsd
 
 export write_frame!, writepdb_trajectory, lovo_mapping, lovo_fitting
+export pdb2trajectory, frame_positions, readpdb_coordinates
+
+## PCA
+export PCA
+export r_avg, X_disp, covariance, pca
 
 # Getting some properties profiles using the density distribution (e.g. electron density profile of POPC on the box)
 include("./density.jl")
@@ -50,5 +55,6 @@ include("./PMF.jl")
 include("./align.jl")
 
 include("./misc-namd.jl")
+include("./pca.jl")
 
 end
