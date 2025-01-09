@@ -119,7 +119,6 @@ function lovo_mapping(
 end
 
 
-
 function lovo_fitting(
                     pdbname::String, 
                     trajectory::String,

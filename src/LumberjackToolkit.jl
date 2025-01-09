@@ -9,7 +9,7 @@ import DelimitedFiles: readdlm
 import Printf: @sprintf, @printf
 import StaticArrays: @SVector, SVector, SMatrix, @SMatrix, MArray
 import Statistics: mean
-import LinearAlgebra: norm, dot, cross, diag, eigen
+import LinearAlgebra: norm, dot, cross, diag, diagm, eigen, det
 
 ## RMSD
 export rmsd_plot
@@ -24,7 +24,7 @@ export avg_densityprofile
 
 export CarbohydrateDihedrals
 export simulation_steps, dihedral_atoms, dihedral_indexes, dihedrals
-export get_pressure, get_energy, get_mass
+export get_pressure, get_energy
 
 export WHAM
 
@@ -34,11 +34,13 @@ export align_trajectory, namd_pbc
 export center_of_mass, rmsd
 
 export write_frame!, writepdb_trajectory, lovo_mapping, lovo_fitting
-export pdb2trajectory, frame_positions, readpdb_coordinates
+export pdb2trajectory, frame_positions
 
+export readcoords
 ## PCA
-export PCA
-export r_avg, X_disp, covariance, pca
+export PCA, _pca_data
+export r_avg, dispm, covarm, massm, mass, pca, projections, explained_variance, quasiharmonic_frequency, quasiharmonic_modes
+export E_quasiharmonic, P_quasiharmonic, pmf_pca
 
 # Getting some properties profiles using the density distribution (e.g. electron density profile of POPC on the box)
 include("./density.jl")

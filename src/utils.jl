@@ -120,8 +120,21 @@ function writepdb_trajectory(
 end
 
 """
+    readcoords(pdbname::String, trjname::String; selection="protein and name CA")
+
+Read the coordinates of a trajectory in a PDB file. Returns a vector of vectors of coordinates of selected atoms.
 """
-function readpdb_coordinates(atoms::AbstractVector{<:PDBTools.Atom}, pdbname::String)
+function readcoords(pdbname::String, trjname::String; selection="protein and name CA")
+    return readcoords(
+                    PDBTools.readPDB(pdbname, selection),
+                    trjname
+                )
+end
+
+"""
+    readcoords(atoms::AbstractVector{<:PDBTools.Atom}, pdbname::String)
+"""
+function readcoords(atoms::AbstractVector{<:PDBTools.Atom}, pdbname::String)
 
     frames = Vector{Vector{SVector{3, Float64}}}()
     frame = Vector{SVector{3, Float64}}(undef, length(atoms))
@@ -219,8 +232,4 @@ function frame_coordinates(
 
     return coor
     
-end
-
-function get_mass(pdbname::String; selection="protein and name CA")
-    return PDBTools.mass.(PDBTools.readPDB(pdbname, selection))
 end
