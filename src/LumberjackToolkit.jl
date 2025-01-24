@@ -1,9 +1,9 @@
 module LumberjackToolkit
 
 import PDBTools
+import EasyFit
 import MolSimToolkit
 import StatsPlots, Plots
-
 import MDLovoFit_jll: mdlovofit
 import DelimitedFiles: readdlm
 import Printf: @sprintf, @printf
@@ -37,10 +37,16 @@ export write_frame!, writepdb_trajectory, lovo_mapping, lovo_fitting
 export pdb2trajectory, frame_positions
 
 export readcoords
+
 ## PCA
 export PCA, _pca_data
 export r_avg, dispm, covarm, massm, mass, pca, projections, explained_variance, quasiharmonic_frequency, quasiharmonic_modes
 export E_quasiharmonic, P_quasiharmonic, pmf_pca
+
+
+##
+export simsteps, realtime
+export testfiles, coef_diffusion, msd
 
 # Getting some properties profiles using the density distribution (e.g. electron density profile of POPC on the box)
 include("./density.jl")
@@ -58,5 +64,9 @@ include("./align.jl")
 
 include("./misc-namd.jl")
 include("./pca.jl")
+
+#
+include("./diffusion.jl")
+include("./simulation.jl")
 
 end
