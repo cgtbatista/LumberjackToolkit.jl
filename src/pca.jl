@@ -85,8 +85,11 @@ function pca(
             mass_weighting=true, quasiharmonic=true, negative=false,
             kB=1.9872041e-3, T=298.15
         )
-
-    frames = readcoords(pdbname, trjname; selection=selection)
+    
+    frames = readcoords(
+                    PDBTools.readPDB(pdbname, selection),
+                    trjname
+                )
 
     sqrt_M, m = sqrt(massm(pdbname, selection=selection)), mass(pdbname, selection=selection)
 
@@ -199,8 +202,11 @@ function pmf_pca(
                 mass_weighting=true, quasiharmonic=true, negative=false,
                 kB=1.9872041e-3, T=298.15
             )
-
-    frames = readcoords(pdbname, trjname; selection=selection)
+    
+    frames = readcoords(
+                    PDBTools.readPDB(pdbname, selection),
+                    trjname
+                )
 
     sqrt_M, m = sqrt(massm(pdbname, selection=selection)), mass(pdbname, selection=selection)
 

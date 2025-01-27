@@ -120,40 +120,30 @@ function writepdb_trajectory(
 end
 
 """
-    readcoords(pdbname::String, trjname::String; selection="protein and name CA")
+    readcoords(atoms::AbstractVector{<:PDBTools.Atom}, pdbname::String)
 
 Read the coordinates of a trajectory in a PDB file. Returns a vector of vectors of coordinates of selected atoms.
-"""
-function readcoords(pdbname::String, trjname::String; selection="protein and name CA")
-    return readcoords(
-                    PDBTools.readPDB(pdbname, selection),
-                    trjname
-                )
-end
-
-"""
-    readcoords(atoms::AbstractVector{<:PDBTools.Atom}, pdbname::String)
 """
 function readcoords(atoms::AbstractVector{<:PDBTools.Atom}, pdbname::String)
 
     frames = Vector{Vector{SVector{3, Float64}}}()
     frame = Vector{SVector{3, Float64}}(undef, length(atoms))
 
-    file = Base.open(pdbname, "r")
-
     idx = 1
-    for line in eachline(file)
-        if startswith(line, "ATOM") || startswith(line, "HETATM")
-            atom = PDBTools.read_atom_pdb(line)
-            frame[idx] = @SVector(Float64[atom.x, atom.y, atom.z])
-            idx += 1
-        end        
-        if startswith(line, "END")
-            push!(frames, deepcopy(frame))
-            idx = 1
+
+    open(pdbname, "r") do file
+        for line in eachline(file)
+            if startswith(line, "ATOM") || startswith(line, "HETATM")
+                atom = PDBTools.read_atom_pdb(line)
+                frame[idx] = @SVector(Float64[atom.x, atom.y, atom.z])
+                idx += 1
+            end        
+            if startswith(line, "END")
+                push!(frames, deepcopy(frame))
+                idx = 1
+            end
         end
     end
-    Base.close(file)
 
     return frames
 end
@@ -213,23 +203,78 @@ function pdb2trajectory(pdbname::String; trajectory=nothing, vmd="vmd", format="
     end
 end
 
-function frame_coordinates(
-                    pdbname::String,
-                    trajectory::String;
-                    selection="protein and name CA",
-                )                
+function molindexes(pdbname::String; selection="water")    
+    return molindexes(
+                    PDBTools.readPDB(pdbname, selection)
+                )
+end
+
+function molindexes(atoms::Vector{<:PDBTools.Atom})
     
-    atoms = PDBTools.readPDB(pdbname, selection)
+    indexes = Dict{Tuple{Int64, String}, Vector{Int64}}()
 
-    simulation = MolSimToolkit.Simulation(atoms, trajectory)
-
-    ##coor = zeros(SVector{length(atoms), MolSimToolkit.Point3D{Float64}}, length(simulation.frame_range))
-    coor = []
-
-    for (i,frame) in enumerate(simulation)
-        push!(coor, MolSimToolkit.positions(frame))
+    for (index, atom) in enumerate(atoms)
+        key = (atom.resnum, atom.segname)
+        
+        if !haskey(indexes, key)
+            indexes[key] = [index]
+        else
+            push!(indexes[key], index)
+        end
     end
 
-    return coor
-    
+    return collect(values(indexes))
+end
+
+"""
+    readcoords(pdbname::String, trjname::String; selection="protein and name CA")
+
+"""
+function readcoords(
+                pdbname::String,
+                trjname::String;
+                selection="water and name OH2", averaging=false, bymol=false,
+                first=1, last=nothing, step=1
+            )
+
+    atoms = PDBTools.readPDB(pdbname, selection)
+    simulation = MolSimToolkit.Simulation(atoms, trjname, first=first, last=last, step=step)
+
+    nframes = length(simulation.frame_range)
+
+    iavg = if averaging
+        molindexes(atoms)
+    end
+
+    N = averaging ? length(iavg) : length(atoms)
+
+    coordinates = if bymol
+            [Vector{SVector{3, Float64}}(undef, nframes) for _ in 1:N]
+        else
+            Vector{Vector{SVector{3, Float64}}}(undef, nframes)
+    end
+
+    for (i, frame) in enumerate(simulation)
+        
+        xyz = if averaging
+                avgpositions(frame, iavg)
+            else
+                MolSimToolkit.positions(frame)
+        end
+
+        if bymol
+            for mol in 1:N
+                coordinates[mol][i] = SVector{3, Float64}(xyz[mol]...)
+            end
+        else
+            coordinates[i] = [SVector{3, Float64}(c...) for c in xyz]
+        end
+    end
+
+    return coordinates
+end
+
+function avgpositions(frame::MolSimToolkit.Chemfiles.Frame, iavg::Vector{Vector{Int64}})
+    coords = MolSimToolkit.positions(frame)
+    return MolSimToolkit.Point3D{Float64}[ mean(coords[ijk]) for ijk in iavg ]
 end

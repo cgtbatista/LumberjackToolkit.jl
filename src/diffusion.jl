@@ -43,26 +43,55 @@ function coef_diffusion(pdbname::String, trajname::String; selection="water", d=
     return D
 end
 
-function MSD(simulation::MolSimToolkit.Simulation, indexes::Vector{Int64})
+# function MSD(simulation::MolSimToolkit.Simulation, indexes::Vector{Int64})
     
-    natoms = length(indexes)
+#     natoms = length(indexes)
     
-    msd = zeros(
-                length(simulation.frame_range)
-            )
+#     msd = zeros(
+#                 length(simulation.frame_range)
+#             )
 
-    ref = MolSimToolkit.positions(simulation.frame)[indexes]
+#     ref = MolSimToolkit.positions(simulation.frame)[indexes]
 
-    for (i, frame) in enumerate(simulation)
+#     for (i, frame) in enumerate(simulation)
         
-        pos = MolSimToolkit.positions(frame)[indexes]
+#         pos = MolSimToolkit.positions(frame)[indexes]
         
-        Δr = 0.
-        for (r0, r) in zip(ref, pos)
-            Δr += norm(r - r0)^2
+#         Δr = 0.
+#         for (r0, r) in zip(ref, pos)
+#             Δr += norm(r - r0)^2
+#         end
+#         msd[i] = inv(natoms) * Δr
+#     end
+
+#    return msd
+# end
+
+function diffusion(pdbname::String, trjname::String)
+    pdbname, trjname = testfiles()
+    coef_diffusion(pdbname, trjname)
+end
+
+function msd(trajectory::Vector{Vector{SVector{3, Float64}}}; step=1, dim=collect(1:3))
+    
+    N, tmax = length(trajectory), length(trajectory[1])
+        
+    t = collect(1:step:tmax)
+
+    MSD = zeros(Float64, length(t))
+    
+    for Δt in t
+
+        Σr2 = 0.0
+        for molecule in trajectory
+            for t0 in 1:(tmax - Δt)
+                r2 = norm(molecule[t0 + Δt] - molecule[t0])^2
+                Σr2 += r2
+            end
         end
-        msd[i] = inv(natoms) * Δr
-    end
 
-   return msd
+        MSD[Δt] = inv(N*(tmax-Δt)) * Σr2
+    end
+    
+    return t, MSD
 end

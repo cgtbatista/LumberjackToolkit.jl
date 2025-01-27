@@ -4,6 +4,7 @@ import PDBTools
 import EasyFit
 import MolSimToolkit
 import StatsPlots, Plots
+
 import MDLovoFit_jll: mdlovofit
 import DelimitedFiles: readdlm
 import Printf: @sprintf, @printf
@@ -11,6 +12,7 @@ import StaticArrays: @SVector, SVector, SMatrix, @SMatrix, MArray
 import Statistics: mean
 import LinearAlgebra: norm, dot, cross, diag, diagm, eigen, det
 
+import Base.Threads: @threads
 ## RMSD
 export rmsd_plot
 
@@ -46,7 +48,7 @@ export E_quasiharmonic, P_quasiharmonic, pmf_pca
 
 ##
 export simsteps, realtime
-export testfiles, coef_diffusion, msd
+export testfiles, coef_diffusion, msd, frame_coordinates, molindexes
 
 # Getting some properties profiles using the density distribution (e.g. electron density profile of POPC on the box)
 include("./density.jl")
