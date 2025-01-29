@@ -51,13 +51,15 @@ function simulation_steps(t_simulation::Int64; unit="ns", timestep=2.0, output=1
 
 end
 
-function center_of_mass(pdbname::String, trajectory::String; selection="all", first=1, last=nothing, step=1)
-    
-    return center_of_mass(MolSimToolkit.Simulation(
-                                    pdbname,
-                                    trajectory;
-                                    first=first, last=last, step=step
-                                ), selection=selection)
+function center_of_mass(
+    pdbname::String, trajectory::String;
+    selection="all",
+    first=1, last=nothing, step=1
+)
+    simulation = MolSimToolkit.Simulation(
+        pdbname, trajectory; first=first, last=last, step=step
+    )
+    return center_of_mass(simulation, selection=selection)
 end
 
 function center_of_mass(simulation::MolSimToolkit.Simulation; selection="all")
@@ -99,54 +101,30 @@ Write a trajectory in a temporary PDB file. This is very useful when you want to
 The MDLovoFit program uses this function to write the trajectory in a PDB file before the analysis.
 """
 function writepdb_trajectory(
-                        pdbname::String,
-                        trajectory::String;
-                        selection="all",
-                        first=1, last=nothing, step=1
-                    )
-
+    pdbname::String,
+    trajectory::String;
+    selection="all", filename=nothing,
+    first=1, last=nothing, step=1
+)
     atoms = PDBTools.readPDB(pdbname, selection)
-    simulation = MolSimToolkit.Simulation(atoms, trajectory, first=first, last=last, step=step)
+    simulation = MolSimToolkit.Simulation(
+            atoms, trajectory,
+            first=first, last=last, step=step
+        )
+    filename = isnothing(filename) ? tempname() * ".pdb" : filename
     
-    tempPDB = tempname() * ".pdb"
-    
-    io = Base.open(tempPDB, "w")
-    for frame in simulation
-        write_frame!(io, atoms, frame)
+    if filename[end-3:end] != ".pdb"
+        throw(ArgumentError("The filename must have the .pdb extension."))
     end
-    Base.close(io)
-
-    return tempPDB
-end
-
-"""
-    readcoords(atoms::AbstractVector{<:PDBTools.Atom}, pdbname::String)
-
-Read the coordinates of a trajectory in a PDB file. Returns a vector of vectors of coordinates of selected atoms.
-"""
-function readcoords(atoms::AbstractVector{<:PDBTools.Atom}, pdbname::String)
-
-    frames = Vector{Vector{SVector{3, Float64}}}()
-    frame = Vector{SVector{3, Float64}}(undef, length(atoms))
-
-    idx = 1
-
-    open(pdbname, "r") do file
-        for line in eachline(file)
-            if startswith(line, "ATOM") || startswith(line, "HETATM")
-                atom = PDBTools.read_atom_pdb(line)
-                frame[idx] = @SVector(Float64[atom.x, atom.y, atom.z])
-                idx += 1
-            end        
-            if startswith(line, "END")
-                push!(frames, deepcopy(frame))
-                idx = 1
-            end
+    
+    Base.open(filename, "w") do io
+        for frame in simulation
+            write_frame!(io, atoms, frame)
         end
     end
-
-    return frames
+    return filename
 end
+
 
 """
     write_frame!(trajectory_pdb_file, atoms, frame
@@ -158,17 +136,15 @@ function write_frame!(pdbfile::IO, atoms::AbstractVector{<:PDBTools.Atom}, frame
     idx_map = Dict(atom.index => idx for (idx, atom) in enumerate(atoms))
     coor = MolSimToolkit.positions(frame)
 
-    for (i,xyz) in enumerate(coor)
-        
+    for (i,xyz) in enumerate(coor)        
         idx = get(idx_map, i, nothing)
 
         if !isnothing(idx)
            atoms[idx].x = xyz[1]
            atoms[idx].y = xyz[2]
            atoms[idx].z = xyz[3]
-           Base.write(pdbfile, PDBTools.write_pdb_atom(atoms[idx]) * "\n")
+           Base.write(pdbfile, PDBTools.write_atom(atoms[idx]) * "\n")
         end
-
     end
 
     Base.write(pdbfile, "ENDMDL\n")
@@ -227,41 +203,60 @@ function molindexes(atoms::Vector{<:PDBTools.Atom})
 end
 
 """
+    readcoords(atoms::AbstractVector{<:PDBTools.Atom}, pdbname::String)
+
+Read the coordinates of a trajectory in a PDB file. Returns a vector of vectors of coordinates of selected atoms.
+"""
+function readcoords(atoms::AbstractVector{<:PDBTools.Atom}, pdbname::String)
+    trajectory, iframe = Vector{Vector{SVector{3, Float64}}}(), Vector{SVector{3, Float64}}(undef, length(atoms))
+    idx = 1
+    open(pdbname, "r") do file
+        for line in eachline(file)
+            if startswith(line, "ATOM") || startswith(line, "HETATM")
+                atom = PDBTools.read_atom_pdb(line)
+                iframe[idx] = @SVector(Float64[atom.x, atom.y, atom.z])
+                idx += 1
+            end        
+            if startswith(line, "END")
+                push!(trajectory, deepcopy(iframe))
+                idx = 1
+            end
+        end
+    end
+    return trajectory
+end
+
+"""
     readcoords(pdbname::String, trjname::String; selection="protein and name CA")
 
 """
-function readcoords(
-                pdbname::String,
-                trjname::String;
-                selection="water and name OH2", averaging=false, bymol=false,
-                first=1, last=nothing, step=1
-            )
-
+function readcoords2(
+    pdbname::String,
+    trjname::String;
+    selection="water and name OH2", averaging=false, bymol=false,
+    first=1, last=nothing, step=1
+)
     atoms = PDBTools.readPDB(pdbname, selection)
     simulation = MolSimToolkit.Simulation(atoms, trjname, first=first, last=last, step=step)
 
-    nframes = length(simulation.frame_range)
-
-    iavg = if averaging
-        molindexes(atoms)
+    if averaging
+        iavg = molindexes(atoms)
+        N = length(iavg)
+    else
+        N = length(atoms)
     end
-
-    N = averaging ? length(iavg) : length(atoms)
-
+    
     coordinates = if bymol
-            [Vector{SVector{3, Float64}}(undef, nframes) for _ in 1:N]
+            [Vector{SVector{3, Float64}}(undef, length(simulation.frame_range)) for _ in 1:N]
         else
-            Vector{Vector{SVector{3, Float64}}}(undef, nframes)
+            Vector{Vector{SVector{3, Float64}}}(undef, length(simulation.frame_range))
     end
-
-    for (i, frame) in enumerate(simulation)
-        
+    for (i, frame) in enumerate(simulation)        
         xyz = if averaging
                 avgpositions(frame, iavg)
             else
                 MolSimToolkit.positions(frame)
         end
-
         if bymol
             for mol in 1:N
                 coordinates[mol][i] = SVector{3, Float64}(xyz[mol]...)
@@ -270,11 +265,128 @@ function readcoords(
             coordinates[i] = [SVector{3, Float64}(c...) for c in xyz]
         end
     end
-
     return coordinates
 end
+
+
+# function readcoords(
+#                 pdbname::String,
+#                 trjname::String;
+#                 selection="water and name OH2", averaging=false, bymol=false,
+#                 first=1, last=nothing, step=1
+#             )
+
+#     atoms = PDBTools.readPDB(pdbname, selection)
+#     simulation = MolSimToolkit.Simulation(atoms, trjname, first=first, last=last, step=step)
+
+#     iavg = if averaging
+#         molindexes(atoms)
+#     end
+
+#     coords = Vector{Vector{MolSimToolkit.Point3D{Float64}}}(undef, length(simulation.frame_range))
+
+#     for (i, frame) in enumerate(simulation)
+        
+#         coords[i] = if averaging
+#             avgpositions(frame, iavg)
+#         else
+#             MolSimToolkit.positions(frame)
+#         end
+
+#     end
+
+#     return coords
+# end
+
+
+function writecoords(
+    pdbname::String,
+    trjname::String;
+    selection="water and name OH2", filename=nothing, isaverage=false,
+    first=1, last=nothing, step=1
+)
+    atoms = PDBTools.readPDB(pdbname, selection)
+    if isaverage
+        idx = molindexes(atoms)
+        N = length(idx)
+    else
+        N = length(atoms)
+    end
+
+    simulation = MolSimToolkit.Simulation(
+        atoms, trjname,
+        first=first, last=last, step=step
+    )
+
+    filename = isnothing(filename) ? tempname() * ".bin" : filename
+    Base.open(filename, "w+") do io             ## the file is open to write and read
+        F = 0
+        Base.write(io, Int32(N)) # number of atoms
+        Base.write(io, Int32(F)) # number of frames
+
+        for frame in simulation
+            coords = if averaging
+                    avgpositions(frame, idx)
+                else
+                    MolSimToolkit.positions(frame)
+            end
+
+            bincoords = Vector{Float64}(undef, 3 * N)
+            for i in 1:N
+                bincoords[3 * (i - 1) + 1] = coords[i][1]
+                bincoords[3 * (i - 1) + 2] = coords[i][2]
+                bincoords[3 * (i - 1) + 3] = coords[i][3]
+            end
+            Base.write(io, bincoords)
+            F += 1
+        end
+
+        seek(io, 4)
+        Base.write(io, Int32(F))
+    end
+    return coordinates
+end
+
 
 function avgpositions(frame::MolSimToolkit.Chemfiles.Frame, iavg::Vector{Vector{Int64}})
     coords = MolSimToolkit.positions(frame)
     return MolSimToolkit.Point3D{Float64}[ mean(coords[ijk]) for ijk in iavg ]
+end
+
+function unwrap(
+    psfname::String,
+    pdbname::String,
+    trajectory::String;
+    new_trajectory=nothing, vmd="vmd", DebugVMD=false
+)
+    
+    new_trajectory = isnothing(new_trajectory) ? tempname() * ".dcd" : new_trajectory
+
+    tcl = tempname() * ".tcl"
+
+    vmdinput = Base.open(tcl, "w")    
+    Base.write(vmdinput,"""
+        package require pbctools
+
+        mol new     $psfname
+        mol addfile $pdbname
+        mol addfile $trajectory waitfor all
+        
+        animate goto 0
+        pbc unwrap -all
+
+        animate write dcd $new_trajectory
+
+        exit
+        """
+        )
+    Base.close(vmdinput)
+
+    vmdoutput = split(Base.read(`$vmd -dispdev text -e $tcl`, String), "\n")
+
+    if DebugVMD
+        return vmdoutput, tcl
+    else
+        return new_trajectory
+    end
 end

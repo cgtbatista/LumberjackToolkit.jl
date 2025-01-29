@@ -5,6 +5,8 @@ import EasyFit
 import MolSimToolkit
 import StatsPlots, Plots
 
+import Mmap: mmap
+import FFTW: rfft, irfft
 import MDLovoFit_jll: mdlovofit
 import DelimitedFiles: readdlm
 import Printf: @sprintf, @printf
@@ -49,6 +51,9 @@ export E_quasiharmonic, P_quasiharmonic, pmf_pca
 ##
 export simsteps, realtime
 export testfiles, coef_diffusion, msd, frame_coordinates, molindexes
+
+## TEST!!
+export readcoords2, msd2, unwrap
 
 # Getting some properties profiles using the density distribution (e.g. electron density profile of POPC on the box)
 include("./density.jl")
