@@ -50,10 +50,10 @@ export E_quasiharmonic, P_quasiharmonic, pmf_pca
 
 ##
 export simsteps, realtime
-export testfiles, coef_diffusion, msd, frame_coordinates, molindexes
+export testfiles, coef_diffusion, msd, frame_coordinates, molindexes, writecoords
 
 ## TEST!!
-export readcoords2, msd2, unwrap
+export readcoords2, msd2, unwrap, dimcells
 
 # Getting some properties profiles using the density distribution (e.g. electron density profile of POPC on the box)
 include("./density.jl")
@@ -75,5 +75,6 @@ include("./pca.jl")
 #
 include("./diffusion.jl")
 include("./simulation.jl")
+include("./unwrap.jl")
 
 end

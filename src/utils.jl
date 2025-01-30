@@ -317,43 +317,75 @@ function writecoords(
         atoms, trjname,
         first=first, last=last, step=step
     )
+    F = length(simulation.frame_range)
 
     filename = isnothing(filename) ? tempname() * ".bin" : filename
-    Base.open(filename, "w+") do io             ## the file is open to write and read
-        F = 0
-        Base.write(io, Int32(N)) # number of atoms
-        Base.write(io, Int32(F)) # number of frames
 
+    Base.open(filename, "w") do io
+        Base.write(io, Int32(N), Int32(F))
+        bincoords = Vector{Float32}(undef, 3 * N)
         for frame in simulation
-            coords = if averaging
+            coords = if isaverage
                     avgpositions(frame, idx)
                 else
                     MolSimToolkit.positions(frame)
             end
-
-            bincoords = Vector{Float64}(undef, 3 * N)
-            for i in 1:N
-                bincoords[3 * (i - 1) + 1] = coords[i][1]
-                bincoords[3 * (i - 1) + 2] = coords[i][2]
-                bincoords[3 * (i - 1) + 3] = coords[i][3]
+            @inbounds for i in 1:N
+                bincoords[3 * (i - 1) + 1] = Float32(coords[i][1])
+                bincoords[3 * (i - 1) + 2] = Float32(coords[i][2])
+                bincoords[3 * (i - 1) + 3] = Float32(coords[i][3])
             end
+            # bincoords = reduce(vcat, [Float32.(coord) for coord in coords])   ## não é muito eficiente, pois reatribui a variável a cada iteração
             Base.write(io, bincoords)
-            F += 1
         end
-
-        seek(io, 4)
-        Base.write(io, Int32(F))
     end
-    return coordinates
+    return filename
 end
-
 
 function avgpositions(frame::MolSimToolkit.Chemfiles.Frame, iavg::Vector{Vector{Int64}})
     coords = MolSimToolkit.positions(frame)
     return MolSimToolkit.Point3D{Float64}[ mean(coords[ijk]) for ijk in iavg ]
 end
 
-function unwrap(
+function unwrapping(
+    psfname::String,
+    pdbname::String,
+    trajectory::String;
+    new_trajectory=nothing, vmd="vmd", DebugVMD=false
+)
+    
+    new_trajectory = isnothing(new_trajectory) ? tempname() * ".dcd" : new_trajectory
+
+    tcl = tempname() * ".tcl"
+
+    vmdinput = Base.open(tcl, "w")    
+    Base.write(vmdinput,"""
+        package require pbctools
+
+        mol new     $psfname
+        mol addfile $pdbname
+        mol addfile $trajectory waitfor all
+        
+        animate goto 0
+        pbc unwrap -all
+
+        animate write dcd $new_trajectory
+
+        exit
+        """
+        )
+    Base.close(vmdinput)
+
+    vmdoutput = split(Base.read(`$vmd -dispdev text -e $tcl`, String), "\n")
+
+    if DebugVMD
+        return vmdoutput, tcl
+    else
+        return new_trajectory
+    end
+end
+
+function unwrapping(
     psfname::String,
     pdbname::String,
     trajectory::String;
