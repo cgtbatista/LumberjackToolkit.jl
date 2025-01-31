@@ -47,13 +47,12 @@ export PCA, _pca_data
 export r_avg, dispm, covarm, massm, mass, pca, projections, explained_variance, quasiharmonic_frequency, quasiharmonic_modes
 export E_quasiharmonic, P_quasiharmonic, pmf_pca
 
-
 ##
 export simsteps, realtime
-export testfiles, coef_diffusion, msd, frame_coordinates, molindexes, writecoords
+export testfiles, coef_diffusion, msd, frame_coordinates, molindexes, writecoords, molframes
 
 ## TEST!!
-export readcoords2, msd2, unwrap, dimcells
+export readcoords2, msd2, unwrap, dimcells, displace, originaldisplace
 
 # Getting some properties profiles using the density distribution (e.g. electron density profile of POPC on the box)
 include("./density.jl")
@@ -75,6 +74,7 @@ include("./pca.jl")
 #
 include("./diffusion.jl")
 include("./simulation.jl")
+
 include("./unwrap.jl")
 
 end

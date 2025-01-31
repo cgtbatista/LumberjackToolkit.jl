@@ -22,15 +22,31 @@ end
 #     return msd
 # end
 
-function coef_diffusion(pdbname::String, trajname::String; selection="water", d=3, first=1, last=nothing, step=1)
+# function coef_diffusion(pdbname::String, trajname::String; selection="water", d=3, first=1, last=nothing, step=1)
     
-    atoms = PDBTools.index.(PDBTools.readPDB(pdbname, selection))
-    simulation = MolSimToolkit.Simulation(pdbname, trajname; first=first, last=last, step=step)
+#     atoms = PDBTools.index.(PDBTools.readPDB(pdbname, selection))
+#     simulation = MolSimToolkit.Simulation(pdbname, trajname; first=first, last=last, step=step)
 
-    msd = MSD(simulation, atoms)
+#     msd = MSD(simulation, atoms)
+
+#     fit = EasyFit.fitlinear(
+#                         collect(simulation.frame_range),
+#                         msd
+#                     )
+#     D = fit.a * inv(2d)
+#     println("""
+#     Diffusion coefficient: $D Å² / ns
+    
+#     Based on the fit:
+#            y = $(fit.a) * x + $(fit.b);     R² = $(fit.R)
+#     """)
+#     return D
+# end
+
+function coef_diffusion(t, msd; d=3)
 
     fit = EasyFit.fitlinear(
-                        collect(simulation.frame_range),
+                        t,
                         msd
                     )
     D = fit.a * inv(2d)
@@ -42,6 +58,7 @@ function coef_diffusion(pdbname::String, trajname::String; selection="water", d=
     """)
     return D
 end
+
 
 function diffusion(pdbname::String, trjname::String)
     pdbname, trjname = testfiles()
@@ -75,9 +92,9 @@ function msd2(trajectory::Vector{Vector{SVector{3, Float64}}}; timestep=1, dims=
     N, tmax = length(trajectory), length(trajectory[1])
         
     τ = collect(
-            1:timestep:(tmax-timestep)
+            0:timestep:(tmax-timestep)
         )
-    MSD = zeros(Float64, length(τ))    
+    MSD = zeros(Float64, length(τ)) 
     for (i, Δt) in enumerate(τ)
         Σ = 0.0
         for molecule in trajectory

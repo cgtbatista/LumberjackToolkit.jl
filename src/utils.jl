@@ -230,43 +230,43 @@ end
     readcoords(pdbname::String, trjname::String; selection="protein and name CA")
 
 """
-function readcoords2(
-    pdbname::String,
-    trjname::String;
-    selection="water and name OH2", averaging=false, bymol=false,
-    first=1, last=nothing, step=1
-)
-    atoms = PDBTools.readPDB(pdbname, selection)
-    simulation = MolSimToolkit.Simulation(atoms, trjname, first=first, last=last, step=step)
+# function readcoords2(
+#     pdbname::String,
+#     trjname::String;
+#     selection="water and name OH2", averaging=false, bymol=false,
+#     first=1, last=nothing, step=1
+# )
+#     atoms = PDBTools.readPDB(pdbname, selection)
+#     simulation = MolSimToolkit.Simulation(atoms, trjname, first=first, last=last, step=step)
 
-    if averaging
-        iavg = molindexes(atoms)
-        N = length(iavg)
-    else
-        N = length(atoms)
-    end
+#     if averaging
+#         iavg = molindexes(atoms)
+#         N = length(iavg)
+#     else
+#         N = length(atoms)
+#     end
     
-    coordinates = if bymol
-            [Vector{SVector{3, Float64}}(undef, length(simulation.frame_range)) for _ in 1:N]
-        else
-            Vector{Vector{SVector{3, Float64}}}(undef, length(simulation.frame_range))
-    end
-    for (i, frame) in enumerate(simulation)        
-        xyz = if averaging
-                avgpositions(frame, iavg)
-            else
-                MolSimToolkit.positions(frame)
-        end
-        if bymol
-            for mol in 1:N
-                coordinates[mol][i] = SVector{3, Float64}(xyz[mol]...)
-            end
-        else
-            coordinates[i] = [SVector{3, Float64}(c...) for c in xyz]
-        end
-    end
-    return coordinates
-end
+#     coordinates = if bymol
+#             [Vector{SVector{3, Float64}}(undef, length(simulation.frame_range)) for _ in 1:N]
+#         else
+#             Vector{Vector{SVector{3, Float64}}}(undef, length(simulation.frame_range))
+#     end
+#     for (i, frame) in enumerate(simulation)        
+#         xyz = if averaging
+#                 avgpositions(frame, iavg)
+#             else
+#                 MolSimToolkit.positions(frame)
+#         end
+#         if bymol
+#             for mol in 1:N
+#                 coordinates[mol][i] = SVector{3, Float64}(xyz[mol]...)
+#             end
+#         else
+#             coordinates[i] = [SVector{3, Float64}(c...) for c in xyz]
+#         end
+#     end
+#     return coordinates
+# end
 
 
 # function readcoords(
@@ -385,40 +385,30 @@ function unwrapping(
     end
 end
 
-function unwrapping(
-    psfname::String,
+function molframes(
     pdbname::String,
-    trajectory::String;
-    new_trajectory=nothing, vmd="vmd", DebugVMD=false
+    trjname::String;
+    selection="water and name OH2",
+    first=1, last=nothing, step=1
 )
-    
-    new_trajectory = isnothing(new_trajectory) ? tempname() * ".dcd" : new_trajectory
+    atoms = PDBTools.readPDB(pdbname, selection)
+    sim = MolSimToolkit.Simulation(
+        atoms,
+        trjname,
+        first=first, last=last, step=step
+    )    
+    return molframes(sim)
+end
 
-    tcl = tempname() * ".tcl"
-
-    vmdinput = Base.open(tcl, "w")    
-    Base.write(vmdinput,"""
-        package require pbctools
-
-        mol new     $psfname
-        mol addfile $pdbname
-        mol addfile $trajectory waitfor all
-        
-        animate goto 0
-        pbc unwrap -all
-
-        animate write dcd $new_trajectory
-
-        exit
-        """
-        )
-    Base.close(vmdinput)
-
-    vmdoutput = split(Base.read(`$vmd -dispdev text -e $tcl`, String), "\n")
-
-    if DebugVMD
-        return vmdoutput, tcl
-    else
-        return new_trajectory
+function molframes(sim::MolSimToolkit.Simulation)
+    natoms = length(sim.atoms)
+    nframes = length(sim.frame_range)
+    trajectory = [Vector{SVector{3, Float64}}(undef, nframes) for _ in 1:natoms]
+    for (iframe, frame) in enumerate(sim)        
+        coords =  MolSimToolkit.positions(frame)
+        for atom in 1:natoms
+            trajectory[atom][iframe] = SVector{3, Float64}(coords[atom]...)
+        end
     end
+    return trajectory
 end
