@@ -77,4 +77,6 @@ include("./simulation.jl")
 
 include("./unwrap.jl")
 
+include("./dupree.jl")
+
 end
