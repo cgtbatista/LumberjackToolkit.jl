@@ -56,7 +56,7 @@ function coef_diffusion(t, msd; d=3)
     Based on the fit:
            y = $(fit.a) * x + $(fit.b);     R² = $(fit.R)
     """)
-    return D
+    return D * 1.0E+9 * (1.0E-8)^2 # to cm²/s
 end
 
 
