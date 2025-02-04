@@ -501,3 +501,69 @@ function pmf2D(
 
     return output_filename
 end
+
+# vmd_makesystems("crystal", cellulose_habits=12345432, pkgload=packages_list)
+# vmd_getsurface("new_crystal")
+# rdata = radii_distribution("new_crystal.pdb", "new_crystal.dat", dstep=0.2)[4]
+# idx_cutoff = findall(ϕ -> ϕ >= 90.0-dϕ && ϕ <= 90.0+dϕ, rdata[3])
+# idx = findall(x -> x > 0., rdata[1][idx_cutoff])
+# d4 = 2*rdata[1][idx_cutoff][idx]
+
+# vmd_makesystems("crystal", cellulose_habits=33333333, pkgload=packages_list)
+# vmd_getsurface("new_crystal")
+# rdata = radii_distribution("new_crystal.pdb", "new_crystal.dat", dstep=0.2)[4]
+# idx_cutoff = findall(ϕ -> ϕ >= 90.0-dϕ && ϕ <= 90.0+dϕ, rdata[3])
+# idx = findall(x -> x > 0., rdata[1][idx_cutoff])
+# d5 = 2*rdata[1][idx_cutoff][idx]
+
+
+# xyz = radii_distribution("new_crystal.pdb", "new_crystal.dat", dstep=0.2)[1]
+# ## 333333 234432 12333321 33333333 12345432
+# println("The mean radius is $(mean(d3)) Å with a standard deviation of $(std(d3)) Å and a total of $(length(d3)) points.")
+# println("The mean radius is $(mean(d2)) Å with a standard deviation of $(std(d2)) Å and a total of $(length(d2)) points.")
+# println("The mean radius is $(mean(d1)) Å with a standard deviation of $(std(d1)) Å and a total of $(length(d1)) points.")
+# println("The mean radius is $(mean(d5)) Å with a standard deviation of $(std(d5)) Å and a total of $(length(d5)) points.")
+# println("The mean radius is $(mean(d4)) Å with a standard deviation of $(std(d4)) Å and a total of $(length(d4)) points.")
+
+# density(d3, bandwidth=0.8, label="333333", xlabel="Fibril diameter (Å)", ylabel="Frequency", title="18-chain", color="black", lw=3)
+# density!(d2, bandwidth=0.8, label="234432", color="lightblue", lw=3)
+# density!(d1, bandwidth=0.8, label="12333321", color="red", lw=3)
+# plot!(size=(800, 800))
+# savefig("18chain.png")
+# density(d5, bandwidth=0.8, label="33333333", xlabel="Fibril diameter (Å)", ylabel="Frequency", title="24-chain", color="black", lw=3)
+# density!(d4, bandwidth=0.8, label="12345432", color="lightblue", lw=3)
+# plot!(size=(800, 800))
+# savefig("24chain.png")
+
+
+# ## violin plot for the all systems
+# #function custom_kde(x; bw)
+# #    kde(x, bandwidth=bw)
+# #end
+
+# d = [d1; d2; d3; d4; d5]
+# smoothed_d = kde(d, bandwidth=0.8)
+# r = [fill("12333321", length(d1)); fill("333333", length(d2)); fill("234432", length(d3)); fill("12345432", length(d4)); fill("33333333", length(d5))]
+# violin(r, d, bw=0.5, xlabel="Cellulose habits", ylabel="Fibril diameter (Å)", title="Fibril diameter distribution", color=:steelblue, lw=2, label=:none)
+# boxplot!(r, d, color=:coral2, lw=2, bar_width=0.25, label=:none, outliers=:false)
+# plot!(size=(800,800), tickfontsize=11, guidefontsize=14)
+# savefig("violin.png")
+
+
+# csvdata = open("microfibrils.csv", "w")
+# Base.write(csvdata, "habit,diameter\n")
+# for i in d3
+#     Base.write(csvdata, "333333,$i\n")
+# end
+# for i in d2
+#     Base.write(csvdata, "234432,$i\n")
+# end
+# for i in d1
+#     Base.write(csvdata, "12333321,$i\n")
+# end
+# for i in d5
+#     Base.write(csvdata, "33333333,$i\n")
+# end
+# for i in d4
+#     Base.write(csvdata, "12345432,$i\n")
+# end
