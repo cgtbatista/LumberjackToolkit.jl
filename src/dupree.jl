@@ -76,10 +76,36 @@ function diameter_analysis(;fibrildata="/home/carlos/Documents/Sandbox/paul/m234
 
 end
 
+function chain_centers(;pdbname::String="/home/user/Documents/outros/phd/dupree2/fibril/systems/m23432.pdb", Δ=0.1,  isreference=true)
+    center = Vector{SVector{3, Float64}}()
+    atoms = PDBTools.readPDB(pdbname)
+    monomers = PDBTools.resnum.(atoms)
+    p_first = mean(
+            PDBTools.coor(PDBTools.select(atoms, atom -> atom.resnum == minimum(monomers)))
+        )
+    p_last = mean(
+            PDBTools.coor(PDBTools.select(atoms, atom -> atom.resnum == maximum(monomers)))
+        )
+    displace = p_last - p_first
+    norm_displace = norm(displace)
+    for i in 0:Δ:norm_displace
+        icenter = p_first .+ i * (displace/norm_displace)
+        if isreference
+            push!(center, icenter)
+        else
+            iatoms = PDBTools.select(atoms, atom -> -0.5*Δ <= norm(PDBTools.coor(atom) - icenter) <= .5*Δ)
+            push!(center, mean(PDBTools.coor(iatoms)))
+        end
+    end
+    return center
+end
+
+function fibrilradii(pdbname::String, filename::String, Δz::Float64)
+end
+
 function fibrilradii(
     pdb::String,
     file::String;
-    rounding_xyz=3,
     Δz=0.01,
     steps=false, Δstep=0.1
 )
@@ -90,17 +116,18 @@ function fibrilradii(
         throw(ArgumentError("The Δstep ($Δstep Å) should be greater than Δz ($Δz Å) to avoid duplicate radius quantification."))
     end
     atoms = PDBTools.readPDB(pdb)
-    lower_cutoff = mean([ atom.z for atom in PDBTools.select(atoms, atom -> atom.resnum == minimum(PDBTools.resnum.(atoms))) ])
-    upper_cutoff = mean([ atom.z for atom in PDBTools.select(atoms, atom -> atom.resnum == maximum(PDBTools.resnum.(atoms))) ])
+    lower_cutoff = mean([
+            atom.z for atom in PDBTools.select(atoms, atom -> atom.resnum == minimum(PDBTools.resnum.(atoms)))
+        ])
+    upper_cutoff = mean([
+            atom.z for atom in PDBTools.select(atoms, atom -> atom.resnum == maximum(PDBTools.resnum.(atoms)))
+        ])
     data = readdlm(file)
-    rawxyz = [ 
-        [ round(
-            i[1], digits=rounding_xyz), round(i[2], digits=rounding_xyz), round(i[3], digits=rounding_xyz
-        ) ] for i in eachrow(data) ]
-    xyz = unique(rawxyz)
-    zaxis = [ i[3] for i in xyz ]
-    xyz, zaxis = xyz[sortperm(zaxis)], zaxis[sortperm(zaxis)]
-    ztoken = 0.
+    xyz = unique(
+            [ [irow[1], irow[2], irow[3]] for irow in eachrow(data) ]
+        )
+    zaxis = [ ijk[3] for ijk in xyz ]
+    xyz, zaxis, ztoken = xyz[sortperm(zaxis)], zaxis[sortperm(zaxis)], 0.
     r = Float64[]; ϕ = Float64[]; θ = Float64[]; central_vectors = Vector{Float64}[]; labels = Int64[];
     for (i, z) in enumerate(zaxis)
         if (z < lower_cutoff) || (z > upper_cutoff)
@@ -117,12 +144,11 @@ function fibrilradii(
                 ztoken = z
             end
         end
-        lower_bound = z-Δz; upper_bound = z+Δz;
-        Δatoms = PDBTools.select(atoms, atom -> (atom.z >= lower_bound) && (atom.z <= upper_bound))
+        Δatoms = PDBTools.select(atoms, atom -> (atom.z >= z - Δz) && (atom.z <= z + Δz))
         xyz0 = [ mean([ xyz[1] for xyz in PDBTools.coor(Δatoms) ]), mean([ xyz[2] for xyz in PDBTools.coor(Δatoms) ]), mean([ xyz[3] for xyz in PDBTools.coor(Δatoms) ]) ]
         if isnan(mean(xyz0)); continue; end
         push!(central_vectors, xyz0)
-        for idx in findall(z -> (z >= lower_bound) && (z <= upper_bound), zaxis)
+        for idx in findall(z -> (z >= z - Δz) && (z <= z + Δz), zaxis)
             ## picking {r, θ, ϕ} -- following the physical spherical coordinates classification as { radius, azimuthal, polar }
             vector_xyz = xyz[idx] - xyz0
             idx_r = norm(vector_xyz)
@@ -131,7 +157,7 @@ function fibrilradii(
             if idx_θ < 0; idx_θ += 360; end
             if idx_ϕ < 0; idx_ϕ += 360; end
             ## pushing the data
-            push!(r, round(idx_r, digits=rounding_xyz)); push!(θ, round(idx_θ, digits=1)); push!(ϕ, round(idx_ϕ, digits=1)); push!(labels, i)
+            push!(r, idx_r); push!(θ, idx_θ); push!(ϕ, idx_ϕ); push!(labels, i)
         end
     end
     return xyz, central_vectors, labels, [ r, θ, ϕ ]

@@ -84,15 +84,15 @@ It is important to notice that trajectories must have been adjusted to approach:
 - `step::Int=1`: The time step to calculate the MSD.
 - `dim::Vector{Int}=collect(1:3)`: The dimensions to calculate the MSD.
 """
-function msd2(trajectory::Vector{Vector{SVector{3, Float64}}}; timestep=1, dims=collect(1:3))    
-    if timestep <= 0
+function msd(trajectory::Vector{Vector{SVector{3, Float64}}}; step=1, dims=collect(1:3))
+    if step <= 0
         throw(ArgumentError("step must be greater than 0"))
     end
 
     N, tmax = length(trajectory), length(trajectory[1])
         
     τ = collect(
-            0:timestep:(tmax-timestep)
+            0:step:(tmax-step)
         )
     MSD = zeros(Float64, length(τ)) 
     for (i, Δt) in enumerate(τ)

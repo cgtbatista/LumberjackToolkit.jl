@@ -72,9 +72,9 @@ for each atoms in the simulation. The carbohydrate chain is defined by the `segn
 Wohlert uses a lot the ϕ(O5'-C1'-O4-C4) and ψ(C1'-O4-C4-C3) definition, while Carol uses ϕ(O5'-C1'-O4-C4) and ψ(C1'-O4-C4-C5)
 """
 function dihedrals(
-                pdbname::String, trajectory::String, segname::String;
-                first_resid=3, last_resid=98, dihedral1="O5'-C1'-O4-C4", dihedral2="C1'-O4-C4-C3", sep="-",
-                first=1, last=nothing, step=1,
+    pdbname::String, trajectory::String, segname::String;
+                first_resid=3, last_resid=98, dihedral1="O5'-C1'-O4-C4", dihedral2="C1'-O4-C4-C5", sep="-",
+                first=1, last=nothing, step=1, 
                 outfile=nothing
             )
 
@@ -102,19 +102,19 @@ function dihedrals(
         angle1 = Float64[]; angle2 = Float64[]; sum_dihedrals = Float64[]
     end
 
-    ## ith frame, monitored residue, monitored atom name, monitored segment name, reference atom name, reference segment name, minimum distance
     for frame in simulation
         
         i = simulation.frame_index
         
         coor = MolSimToolkit.positions(frame)
 
-        println(raw"""
+        println("""
 
-        ~~~~ Frame""" * " $i " * raw"""~~~~
+        ~~~~ Frame $i ~~~~
 
         frame           i      j          ϕ          ψ      ϕ + ψ
-        ---------------------------------------------------------""")        
+        ---------------------------------------------------------
+        """)        
 
         resid = first_resid
         

@@ -52,9 +52,12 @@ export testfiles, coef_diffusion, msd, frame_coordinates, molindexes, writecoord
 
 ## TEST!!
 export readcoords2, msd2, unwrap, dimcells, displace, originaldisplace
-export teste2, diameter_analysis, fibrilradii
+export teste2, diameter_analysis, fibrilradii, chain_centers
+
+export mapwater, checking_residence, t_residence
 
 # Getting some properties profiles using the density distribution (e.g. electron density profile of POPC on the box)
+include("./residence_time.jl")
 include("./density.jl")
 include("./dihedrals.jl")
 

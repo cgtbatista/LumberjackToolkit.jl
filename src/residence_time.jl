@@ -222,3 +222,227 @@ function water_segment(pdbfile::String, trajectory::String, segment::String; non
     end; println(""); println(" ~~ Done!"); return nothing
 
 end
+
+# function mapwater(
+#     pdbname::String,
+#     trjname::String; first=1, step=1, last=nothing,
+#     selection="not water", water_selection="water",
+#     without_hydrogens=true,
+#     cutoff=10.0,
+#     filename=nothing
+# )
+#     simulation = MolSimToolkit.Simulation(pdbname, trjname, first=first, step=step, last=last)
+#     return mapwater(
+#         simulation,
+#         selection = selection, water_selection = water_selection,
+#         without_hydrogens = without_hydrogens,
+#         cutoff = cutoff,
+#         filename = filename
+#     )
+# end
+
+## CELLULOSE
+# selection = atom -> (
+#     atom.segname == "A24" || atom.segname == "A23" || atom.segname == "A30" || atom.segname == "A29" || atom.segname == "A28" || atom.segname == "A19" ||
+#     atom.segname == "A11" || atom.segname == "A12" || atom.segname == "A5"  || atom.segname == "A6"  || atom.segname == "A7"  || atom.segname == "A16" ||
+#     atom.segname == "B24" || atom.segname == "B23" || atom.segname == "B30" || atom.segname == "B29" || atom.segname == "B28" || atom.segname == "B19" ||
+#     atom.segname == "B11" || atom.segname == "B12" || atom.segname == "B5"  || atom.segname == "B6"  || atom.segname == "B7"  || atom.segname == "B16" ||
+#     atom.segname == "C24" || atom.segname == "C23" || atom.segname == "C30" || atom.segname == "C29" || atom.segname == "C28" || atom.segname == "C19" ||
+#     atom.segname == "C11" || atom.segname == "C12" || atom.segname == "C5"  || atom.segname == "C6"  || atom.segname == "C7"  || atom.segname == "C16" ||
+#     atom.segname == "D24" || atom.segname == "D23" || atom.segname == "D30" || atom.segname == "D29" || atom.segname == "D28" || atom.segname == "D19" ||
+#     atom.segname == "D11" || atom.segname == "D12" || atom.segname == "D5"  || atom.segname == "D6"  || atom.segname == "D7"  || atom.segname == "D16" ||
+#     atom.segname == "E24" || atom.segname == "E23" || atom.segname == "E30" || atom.segname == "E29" || atom.segname == "E28" || atom.segname == "E19" ||
+#     atom.segname == "E11" || atom.segname == "E12" || atom.segname == "E5"  || atom.segname == "E6"  || atom.segname == "E7"  || atom.segname == "E16" ||
+#     atom.segname == "F24" || atom.segname == "F23" || atom.segname == "F30" || atom.segname == "F29" || atom.segname == "F28" || atom.segname == "F19" ||
+#     atom.segname == "F11" || atom.segname == "F12" || atom.segname == "F5"  || atom.segname == "F6"  || atom.segname == "F7"  || atom.segname == "F16"
+#     )
+# )
+
+## XYLAN
+# XY1 XY2 XY3 XY4 XY5 XY6 XY7 XY8 XY9 XY10 XY11 XY12 XY13 XY14 XY15 XY16 XY21 XY22 XA17 XB17 XC17 XA18 XB18 XC18 XA19 XB19 XC19 XA20 XB20 XC20
+
+## MANNAN
+# AN1 AN2 AN3 AN4 AN5 AN6 AN7 AN8 AN9 AN10 AN11 AN12 AN13 AN14 AN15 AN16 AN17 AN18 AN19 AN20 AN21 AN22 AN23 AN24 AN31 AN32 AN33 MA25 MB25 MC25 MA26 MB26 MC26 MA27 MB27 MC27 MA28 MB28 MC28 MA29 MB29 MC29 MA30 MB30 MC30
+
+
+function mapwater(
+    simulation::MolSimToolkit.Simulation;
+    selection="not water",                      # selection of the reference atoms -- it's the solute! It can be the carbohydrates, the ions, etc.
+    water_selection="water",                    # selection of the water molecules, ie. the solvent of the PCW matrix
+    without_hydrogens=true,                     # if the hydrogens should be removed from the analysis. Very useful to approach some experimental evidences.
+    cutoff=5.0                                  # the cutoff distance to consider the water molecule around the reference atoms
+)
+    reference = PDBTools.select(simulation.atoms, selection) 
+    monitored = PDBTools.select(simulation.atoms, water_selection)
+    if without_hydrogens
+        reference = PDBTools.select(reference, at -> PDBTools.element(at) != "H")
+        monitored = PDBTools.select(monitored, at -> PDBTools.element(at) != "H")
+        natoms = 1
+    else
+        natoms = 3
+    end
+    imonitored, jreference = PDBTools.index.(monitored), PDBTools.index.(reference)     
+    M = Matrix{Bool}(undef, length(imonitored), length(simulation.frame_range))
+    for (iframe, frame) in enumerate(simulation)
+        xyz, uc = MolSimToolkit.positions(frame), diag(MolSimToolkit.unitcell(frame))
+        mindistances = MolSimToolkit.minimum_distances(
+            xpositions = [ SVector(xyz[i]) for i in imonitored ],     # solvent - the monitored atoms around the reference (e.g. water)
+            ypositions = [ SVector(xyz[j]) for j in jreference ],     # solute  - the reference atoms (e.g. polymeric matrix)
+            xn_atoms_per_molecule = natoms,
+            cutoff = cutoff,
+            unitcell = uc
+        )
+        for (iwater, md) in enumerate(mindistances)
+           M[iwater, iframe] = md.within_cutoff
+        end
+    end
+    return M
+end
+
+function t_residence(M::Matrix{Bool}; timestep=0.1)
+    t = Float64[]
+    for i in 1:size(M, 1)
+        append!(
+            t,
+            timestep * checking_residence(M[i, :])
+        )
+    end
+    return t[findall(it -> !iszero(it), t)]
+end
+
+function checking_residence(frames::Vector{Bool})
+    if iszero(sum(frames))
+        return 0
+    end
+    step = Int64[]
+    notfound, counter = findall(frame -> !frame, frames), 0
+    for iframe in 1:length(frames)
+        if !in(iframe, Set(notfound))
+            counter += 1
+        else
+            push!(step, counter)
+            counter = 0
+        end
+        if iframe == length(frames)
+            push!(step, counter)
+        end
+    end
+    return step
+end
+
+# function mapwater(
+#     simulation::MolSimToolkit.Simulation;
+#     selection="not water", water_selection="water",
+#     without_hydrogens=true,
+#     cutoff=10.0,
+#     filename=nothing
+# )
+#     waters, reference = PDBTools.select(simulation.atoms, water_selection), PDBTools.select(simulation.atoms, selection)
+#     if without_hydrogens
+#         waters = PDBTools.select(waters, at -> PDBTools.element(at) != "H")
+#         reference = PDBTools.select(reference, at -> PDBTools.element(at) != "H")
+#         water_natoms = 1
+#     else
+#         water_natoms = 3
+#     end
+#     iwater, jreference = PDBTools.index.(waters), PDBTools.index.(reference)
+#     filename = isnothing(filename) ? tempname() * ".dat" : filename
+#     println("""
+#     ~~ Calculating the shortest distances for all water molecules and the reference atoms based on $(length(simulation.frame_range)) frames:
+#     """)
+#     Base.open(filename, "w") do file
+#         ## ith frame, monitored residue, monitored atom name, monitored segment name, reference atom name, reference segment name, minimum distance
+#         distances = []
+#         for frame in simulation
+#             iframe = simulation.frame_index
+#             println(" frame $iframe")
+#             coor, uc = MolSimToolkit.positions(frame), diag(MolSimToolkit.unitcell(frame))
+#             distances = MolSimToolkit.minimum_distances(
+#                 xpositions = [ SVector(coor[i]) for i in iwater ],     # solvent - the monitored atoms around the reference (e.g. water)
+#                 ypositions = [ SVector(coor[i]) for i in jreference ], # solute  - the reference atoms (e.g. polymeric matrix)
+#                 xn_atoms_per_molecule = water_natoms,
+#                 cutoff = cutoff,
+#                 unitcell = uc
+#             )
+#             for distance in distances
+#                 if !iszero([distance.i , distance.j])
+#                     resnum_water, segname_water = PDBTools.resnum(waters[distance.i]), PDBTools.segname(waters[distance.i])
+#                     println(file, "$iframe $resnum_water $segname_water $(distance.d)")
+#                 end
+#             end
+#         end
+#     end
+#     println("""
+
+#     ~~ It's done! The information was saved in $(abspath(filename)).
+#     """)
+#     return filename
+# end
+
+
+# function retention_time(filename::String; nframes = 10, timestep=1, md_time="ns", dist_cutoff=10.0)
+    
+#     closest_water_time = Dict{Tuple{Int64, String}, Vector{Int64}}()
+#     closest_water_dist = Dict{Tuple{Int64, String}, Vector{Float64}}()
+
+#     water_data = readdlm(filename)
+
+#     for irow in eachindex(water_data[:,1])
+#         if isnan(water_data[irow, end]) || water_data[irow, end] > dist_cutoff
+#             continue
+#         end
+#         resid, segid = Int64(water_data[irow, 3]), String(water_data[irow, 4]) 
+#         key = (resid, segid)
+#         if haskey(closest_water_time, key) && haskey(closest_water_dist, key)
+#             push!(closest_water_time[key], water_data[irow,1])
+#             push!(closest_water_dist[key], water_data[irow,end])
+#         else
+#             closest_water_time[key] = [water_data[irow,1]]
+#             closest_water_dist[key] = [water_data[irow,end]]
+#         end
+#     end
+    
+#     ## Residence time
+#     water_molecules = collect(1:length(closest_water_time)); unique_water_molecules = [ key for key in keys(closest_water_time) ]
+#     filename_label = split(split(filename, ".")[1], "_")[2]
+#     #a
+#     println("~ $filename_label")
+#     println("  $(size(water_molecules)[1]) water molecules in range")
+#     filename_array = []; ith_water_array = [];
+#     min_rtime_array = []; max_rtime_array = []; contact_array = []; fluctuation_array = []; mean_dist_array = []; std_dist_array = []; closest_dist_array = [];
+#     for iwater in eachindex(unique_water_molecules)
+#         ikey = unique_water_molecules[iwater]; iwater_label = string( ikey[2], ikey[1])
+#         water_time = closest_water_time[ikey]; water_dist = closest_water_dist[ikey]
+#         if iwater != 0; ## == 1 just to dummy the simulation
+#             println("  $(iwater) - the water molecule $iwater_label appeared $(size(water_time)[1])/$nframes:")
+#             min_rtime=0; max_rtime=0; contact_time=0; fluctuation=0;
+#             mean_dist=mean(water_dist); std_dist=std(water_dist); closest_dist=minimum(water_dist);
+#             el=1; dt=0; lost_contact=0;
+#             while el < length(water_time)
+#                 if water_time[el+1]-water_time[el] == 1
+#                     dt += 1; contact_time += 1; max_rtime += 1;
+#                 else
+#                     lost_contact += 1
+#                     if min_rtime > dt; min_rtime = dt; end
+#                     if max_rtime < dt; min_rtime = max_rtime; max_rtime = dt; end
+#                     dt = 0
+#                 end
+#                 if length(water_time)-max_rtime == 1; min_rtime = max_rtime; end
+#                 el += 1
+#             end
+#             max_rtime = max_rtime * timestep; min_rtime = min_rtime * timestep; contact_time = contact_time * timestep; fluctuation = lost_contact;
+#             push!(filename_array, filename_label); push!(ith_water_array, iwater_label);
+#             push!(min_rtime_array, min_rtime); push!(max_rtime_array, max_rtime); push!(contact_array, contact_time); push!(fluctuation_array, fluctuation);
+#             push!(mean_dist_array, mean_dist); push!(std_dist_array, std_dist); push!(closest_dist_array, closest_dist);
+#             println("  + the water retention time reached a minimum of $min_rtime $md_time and a maximum of $max_rtime $md_time.")
+#             println("  + the water spent $contact_time $md_time on surroundings, but it lost the contact $lost_contact time(s).")
+#             println("  + the water molecule mean distance was ($(round(mean_dist, digits=2)) ± $(round(std_dist, digits=2))) Å, with $(round(closest_dist, digits=2)) Å as the closest distance.")
+#             println("")
+#         end
+#         ## ikey = iésima água do vetor unique_water_molecules, onde ikey[2] é o segmento e ikey[1] é o número do resíduo
+#     end
+#     return filename_array, ith_water_array, min_rtime_array, max_rtime_array, contact_array, fluctuation_array, mean_dist_array, std_dist_array, closest_dist_array
+#     #println("- water molecules mean distance (histogram like 2D to see better effect of time in the distribution)")
+#     #println("- relantionship between retention time and distance (linear regression??)")       
+
+# end

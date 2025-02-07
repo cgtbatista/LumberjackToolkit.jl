@@ -400,34 +400,35 @@ function molframes(
     return molframes(sim)
 end
 
-# function molframes(sim::MolSimToolkit.Simulation)
-#     natoms = length(sim.atoms)
-#     nframes = length(sim.frame_range)
-#     trajectory = [Vector{SVector{3, Float64}}(undef, nframes) for _ in 1:natoms]
-#     for (iframe, frame) in enumerate(sim)        
-#         coords =  MolSimToolkit.positions(frame)
-#         for atom in 1:natoms
-#             trajectory[atom][iframe] = SVector{3, Float64}(coords[atom]...)
-#         end
-#     end
-#     return trajectory
-# end
-
 function molframes(sim::MolSimToolkit.Simulation)
-    natoms, nframes = length(sim.atoms), length(sim.frame_range)
+    natoms = length(sim.atoms)
+    nframes = length(sim.frame_range)
     trajectory = [Vector{SVector{3, Float64}}(undef, nframes) for _ in 1:natoms]
-    MolSimToolkit.first_frame!(sim)
-    plast = deepcopy(
-            MolSimToolkit.positions(MolSimToolkit.current_frame(sim))
-        )
-    for iframe in 2:length(sim)
-        frame = MolSimToolkit.next_frame!(sim)
-        p =  MolSimToolkit.positions(frame)
-        uc = MolSimToolkit.unitcell(frame)
-        for iatom in 1:natoms
-            trajectory[iatom][iframe] = SVector{3, Float64}(MolSimToolkit.wrap(p[iatom], plast[iatom], uc)...)
+    for (iframe, frame) in enumerate(sim)        
+        coords =  MolSimToolkit.positions(frame)
+        for atom in 1:natoms
+            trajectory[atom][iframe] = SVector{3, Float64}(coords[atom]...)
         end
-        plast .= p
     end
     return trajectory
 end
+
+# function molframes(sim::MolSimToolkit.Simulation)
+#     natoms, nframes = length(sim.atoms), length(sim.frame_range)
+#     trajectory = [Vector{SVector{3, Float64}}(undef, nframes) for _ in 1:natoms]
+#     MolSimToolkit.first_frame!(sim)
+#     plast = deepcopy(
+#             MolSimToolkit.positions(MolSimToolkit.current_frame(sim))
+#         )
+#     for iframe in 2:length(sim)
+#         frame = MolSimToolkit.next_frame!(sim)
+#         p =  MolSimToolkit.positions(frame)
+#         uc = MolSimToolkit.unitcell(frame)
+#         for iatom in 1:natoms
+#             pat = MolSimToolkit.wrap(p[iatom], plast[iatom], uc)
+#             trajectory[iatom][iframe] = SVector{3, Float64}(pat...)
+#         end
+#         plast .= p
+#     end
+#     return trajectory
+# end
