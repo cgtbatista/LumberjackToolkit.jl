@@ -1,3 +1,141 @@
+const cellulose_atoms_vdw_radii = Dict{String, Float64}(
+    ## carbons
+    "C1" => 2.000, "C2" => 2.000, "C3" => 2.000, "C4" => 2.000, "C5" => 2.000, "C6" => 2.010,
+    ## oxygens
+    "O1" => 1.765, "O2" => 1.765, "O3" => 1.765, "O4" => 1.765, "O5" => 1.650, "O6" => 1.765,
+    ## hydrogens
+    "H1" => 1.340, "H2" => 1.340, "H3" => 1.340, "H4" => 1.340, "H5" => 1.340, "H61" => 1.340,
+    "H62" => 1.340, "HO1" => 1.800, "HO2" => 1.800, "HO3" => 1.800, "HO4" => 1.800, "HO6" => 1.800
+)   ## they are the CHARMM36 force field standard radii! Please check top_all36_carb.rtf file
+
+"""
+
+    surface(rawfile::String; surface_method="distance", selection="all", parameters="-res 0.6 -cutoff 4.0", vmd="vmd")
+
+Generate a surface from a VMD input file using the `volmap` plugin. The surface can be generated using different methods, such as `distance`, `density`, among others.
+The default method is `distance`. The selection can be defined by the user, and the default is `all`.
+
+The parameters can be set by the user, and the default is `-res 0.6 -cutoff 4.0`. The VMD executable can be provided as an argument whether is not on default PATH.
+
+## Arguments
+
+- `rawfile::String`: The name of the input file without extension. The script will look for `rawfile.pdb` and `rawfile.psf`.
+
+- `surface_method::String="distance"`: The method to be used to generate the surface using the volmap tools. The default is `distance`.
+    `density`
+        creates a map of the weighted atomic density at each gridpoint. This is done by replacing each atom in the selection with a normalized gaussian distribution
+        of width (standard deviation) equal to its atomic radius. The gaussian distribution for each atom is then weighted using an optional -weight argument, and
+        defaults to a weight of one (i.e, the number density). The various gaussians are then additively distributed on a grid.
+    `interp`
+        creates a map with the atomic weights interpolated onto a grid. For each atom, its weight is distributed to the 8 nearest voxels via a trilinear interpolation.
+        The optional -weight argument defaults to a weight of one.
+    `distance`
+        creates a map for which each gridpoint contains the distance between that point and the edge of the nearest atom. In other words, each gridpoint specifies the
+        maximum radius of a sphere cnetered at that point which does not intersect with the spheres of any other atoms. All atoms are treated as spheres using the
+        atoms' VMD radii.
+    `coulomb`, `coulombmsm`
+        Creates a map of the electrostatic field of the atom selection, made by computing the non-bonded Coulomb potential from each atom in the selection (in units
+        of **k_B.T/e**). The coulomb map generation is optimized to take advantage of multi-core CPUs and programmable GPUs if they are available.
+    `ils`
+        Creates a free energy map of the distribution of a weakly-interacting monoatomic or diatomic gas ligand throughout the system using the Implicit Ligand
+        Sampling (ILS) technique. See additional information about ILS below.
+    `mask`
+        Creates a map which is set to 0 or 1 depending on whether they are within a specified -cutoff distance argument of any atoms in the selection. The mask map is
+        typically used in combination with other maps in order to hide/mask data that is far from a region of interest.
+    `occupancy`
+        Each grid point is set to either 0 or 1, depending on whether it contains onbe or more atoms or not. When averaged over many frames, this will provide the
+        fractional occupancy of that grid point. By default, atoms are treated as spheres using the atomic radii and a gridpoint is considered to be "occupied" if
+        it lies inside that sphere. Use the -points argument to treat atoms as points (a grid point is "occupied" if its grid cube contains an atom's center). 
+
+- `selection::String="all"`: The selection to be used to generate the surface. The default is `all`.
+
+- `parameters::String="-res 0.6 -cutoff 4.0"`: The parameters to be used in the `volmap` plugin. The default is `-res 0.6 -cutoff 4.0`. To understand the parameters,
+   see the VMD documentation https://www.ks.uiuc.edu/Research/vmd/vmd-1.9.4/ug/node157.html.
+
+- `vmd::String="vmd"`: The VMD executable. The default is `vmd`.
+
+### Examples
+
+```julia-repl
+
+julia > surface("new_crystal")
+
+```
+
+"""
+function cellulose_surface(
+    pdbname::String;
+    psfname=nothing,
+    vdw_radii=nothing,
+    surface_method="distance", selection="all", parameters="-res 0.6 -cutoff 4.0",
+    vmd="vmd", vmdDebug=false
+)
+    pdbname = abspath(pdbname)
+    psfname = isnothing(psfname) ? replace(pdbname, ".pdb" => ".psf") : psfname
+    if !isfile(pdbname) || !isfile(psfname)
+        error("File not found: Be sure that exist $psfname and $pdbname files.")
+    end
+    if !isnothing(vdw_radii)
+        if (typeof(vdw_radii) != Vector{Float64}) || (length(vdw_radii) != length(cellulose_atoms_vdw_radii))
+            throw(ArgumentError("The vdw_radii should be a `Vector{Float64}` and it must have 12 elements."))
+        end
+    end
+    tcl = tempname() * ".tcl"
+    dxname, stlname = replace(pdbname, ".pdb" => ".dx"), replace(pdbname, ".pdb" => ".stl")         ## the surface files
+    open(tcl, "w") do file
+        println(file, """
+        mol new     "$psfname"
+        mol addfile "$pdbname"
+        """)
+        for (i, key) in enumerate(keys(cellulose_atoms_vdw_radii))
+            r = isnothing(vdw_radii) ? cellulose_atoms_vdw_radii[key] : vdw_radii[i]
+            println(file, "[atomselect top \"name $key\"] set radius $r")
+        end
+        println(file, """
+        volmap $surface_method [atomselect top "$selection"] $parameters -o $dxname
+        
+        mol delete top
+        
+        mol new "$dxname"
+        
+        axes location off
+        mol modstyle 0 top isosurface 0.5 0 0 0 1 1
+        set unitary_space {{1 0 0 0} {0 1 0 0} {0 0 1 0} {0 0 0 1}}
+        
+        molinfo top set center_matrix [list \$unitary_space]
+        molinfo top set rotate_matrix [list \$unitary_space]
+        molinfo top set scale_matrix  [list \$unitary_space]
+        
+        render STL $stlname true
+        
+        mol delete all
+
+        exit
+        """)
+    end
+
+    vmdoutput = execVMD(tcl, vmd=vmd)
+
+    if vmdDebug
+        return vmdoutput
+    else
+        return dxname, stlname
+    end
+end
+
+function filterSTL(stlname::String)
+    STL = Vector{SVector{3, Float64}}()
+    open(stlname) do file
+        for line in eachline(file)
+            if occursin("vertex", line)
+                vertex = string.(split(line))[2:end]
+                push!(STL, SVector{3, Float64}(parse.(Float64, vertex)))
+            end
+        end
+    end
+    return unique(STL)
+end
+
 function teste2(;data="/home/carlos/Documents/Sandbox/paul/cellulose.dat", nbins=100)
     xyz = readdlm(data)
     x, y, z = xyz[:,1], xyz[:,2], xyz[:,3]
@@ -76,7 +214,7 @@ function diameter_analysis(;fibrildata="/home/carlos/Documents/Sandbox/paul/m234
 
 end
 
-function chain_centers(;pdbname::String="/home/user/Documents/outros/phd/dupree2/fibril/systems/m23432.pdb", Δ=0.1,  isreference=true)
+function chain_centers(pdbname::String; Δz::Float64=0.1, cutoff::Float64=0.5, isreference::Bool=true)
     center = Vector{SVector{3, Float64}}()
     atoms = PDBTools.readPDB(pdbname)
     monomers = PDBTools.resnum.(atoms)
@@ -88,19 +226,72 @@ function chain_centers(;pdbname::String="/home/user/Documents/outros/phd/dupree2
         )
     displace = p_last - p_first
     norm_displace = norm(displace)
-    for i in 0:Δ:norm_displace
+    for i in 0:Δz:norm_displace
         icenter = p_first .+ i * (displace/norm_displace)
         if isreference
             push!(center, icenter)
         else
-            iatoms = PDBTools.select(atoms, atom -> -0.5*Δ <= norm(PDBTools.coor(atom) - icenter) <= .5*Δ)
-            push!(center, mean(PDBTools.coor(iatoms)))
+            iatoms = PDBTools.select(atoms, atom -> norm(PDBTools.coor(atom) - icenter) <= cutoff)
+            if isempty(iatoms)
+                push!(center, icenter)
+            else
+                push!(center, mean(PDBTools.coor(iatoms)))
+            end
         end
     end
     return center
 end
 
-function fibrilradii(pdbname::String, filename::String, Δz::Float64)
+function fibrilwidth(
+    pdbname::String;
+    Δz=1.0, Δθ=1.0, tol=0.5, isreference=false,
+    psfname=nothing, vdw_radii=nothing,
+    surface_parameters="-res 0.6 -cutoff 4.0", vmd="vmd"
+)
+    stl = cellulose_surface(
+        pdbname, psfname=psfname, vdw_radii=vdw_radii, parameters=surface_parameters, vmd=vmd
+    )[2]
+    fibril_centers = chain_centers(
+        pdbname, Δz=Δz, cutoff=0.5*Δz, isreference=isreference
+    )
+    if 2*tol > Δz
+        throw(ArgumentError("The tolerance should be less than half of the Δz."))
+    end
+    xyz = filterSTL(stl)
+    return scan_diameter(xyz, fibril_centers, Δθ=Δθ, tol=tol)
+end
+
+function scan_diameter(xyz::Vector{SVector{3, Float64}}, centers::Vector{SVector{3, Float64}}; Δθ=1.0, tol=0.05)
+    d = Float64[]
+    for center in centers
+        isurface = findall(k -> norm(k - center[3]) <= tol, [ ijk[3] for ijk in xyz ])
+        println(typeof(xyz[isurface]), typeof(center))
+        surface = [ coords - center for coords in xyz[isurface] ]
+        r = norm.(surface)
+        x, y, z = [ s[1] for s in surface ], [ s[2] for s in surface ], [ s[3] for s in surface ]
+        norm_xy = norm.([ s[1:3] for s in surface ])
+        θ= sign.(y) .* acosd.(x ./ norm_xy)
+        ϕ = acosd.(z ./ r)
+        θ, ϕ = mod.(θ, 360.), mod.(ϕ, 360.)
+        for step in 0.0:Δθ:360.0
+            θ_first, θ_last = mod(step - 0.5*Δθ, 360.0), mod(step + 0.5*Δθ, 360.0)
+            idxθ = if θ_first < θ_last
+                    findall(i -> (i >= θ_first) && (i <= θ_last), θ)
+                else
+                    findall(i -> (i >= θ_first) || (i <= θ_last), θ)
+            end
+            for idx in idxθ
+                idxϕ = findall(i -> (i >= ϕ[idx] - tol) && (i <= ϕ[idx] + tol), ϕ)
+                if isempty(idxϕ)
+                    continue
+                end
+                inv_r = r[idxϕ]; inv_θ = θ[idxϕ]; inv_ϕ = ϕ[idxϕ]
+                distances = @. sqrt((r)^2 + (inv_r)^2 - 2*(r)*(inv_r)*(sind(inv_ϕ)*sind(ϕ)*cosd(inv_θ-θ)+cosd(inv_ϕ)*cosd(ϕ)))
+                append!(d, median(distances))
+            end
+        end
+    end
+    return d
 end
 
 function fibrilradii(

@@ -56,6 +56,9 @@ export teste2, diameter_analysis, fibrilradii, chain_centers
 
 export mapwater, checking_residence, t_residence
 
+## dupree
+export cellulose_surface, filterSTL, fibrilwidth
+
 # Getting some properties profiles using the density distribution (e.g. electron density profile of POPC on the box)
 include("./residence_time.jl")
 include("./density.jl")
