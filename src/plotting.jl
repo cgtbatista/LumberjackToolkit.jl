@@ -567,3 +567,37 @@ end
 # for i in d4
 #     Base.write(csvdata, "12345432,$i\n")
 # end
+
+function fibril_surface(
+    xyz::Vector{SVector{3, Float64}};
+    centers=nothing, filename=nothing,
+    legend=:none, size=(800, 800), color1=:blue, color2=:red, marker=1
+)
+    Plots.plot(xlabel="y (Å)", ylabel="z (Å)", zlabel="x (Å)", legend=legend, size=size) 
+    Plots.scatter!(
+        [ vec[2] for vec in xyz ], [ vec[3] for vec in xyz ], [ vec[1] for vec in xyz ],
+        color=color1, marker=marker
+    )
+    if !isnothing(centers)
+        Plots.scatter!(
+            [ vec[2] for vec in centers ], [ vec[3] for vec in centers ], [ vec[1] for vec in centers ],
+            color=color2, marker=marker
+        )
+    end
+    #Plots.savefig(output_filename)
+    return Plots.current()
+end
+
+function fibril_slice(
+    xyz::Vector{SVector{3, Float64}}, step::Int64;
+    Δz=1.0, legend=:none, size=(800, 800), color1=:blue, marker=1,
+    filename=nothing
+)
+    Plots.plot(xlabel="y (Å)", ylabel="x (Å)", legend=legend, size=size)
+    isorted = sortperm([ vec[3] for vec in xyz ])
+    x, y, z = [ vec[2] for vec in xyz[isorted] ], [ vec[1] for vec in xyz[isorted] ], [ vec[3] for vec in xyz[isorted] ]
+    idx = findall(k -> norm(k - unique(z)[step]) <= Δz, z)
+    Plots.scatter!(x[idx], y[idx], color=color1, marker=marker)
+    #Plots.savefig(output_filename)
+    return Plots.current()
+end

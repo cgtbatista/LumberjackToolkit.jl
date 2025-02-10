@@ -113,9 +113,7 @@ function cellulose_surface(
         exit
         """)
     end
-
     vmdoutput = execVMD(tcl, vmd=vmd)
-
     if vmdDebug
         return vmdoutput
     else
@@ -265,34 +263,56 @@ function scan_diameter(xyz::Vector{SVector{3, Float64}}, centers::Vector{SVector
     d = Float64[]
     for center in centers
         isurface = findall(k -> norm(k - center[3]) <= tol, [ ijk[3] for ijk in xyz ])
-        println(typeof(xyz[isurface]), typeof(center))
-        surface = [ coords - center for coords in xyz[isurface] ]
+        surface = [ surf - center for surf in xyz[isurface] ]
         r = norm.(surface)
         x, y, z = [ s[1] for s in surface ], [ s[2] for s in surface ], [ s[3] for s in surface ]
-        norm_xy = norm.([ s[1:3] for s in surface ])
-        θ= sign.(y) .* acosd.(x ./ norm_xy)
+        norm_xy = norm.([ s[1:2] for s in surface ])
+        θ = sign.(y) .* acosd.(x ./ norm_xy)
         ϕ = acosd.(z ./ r)
         θ, ϕ = mod.(θ, 360.), mod.(ϕ, 360.)
-        for step in 0.0:Δθ:360.0
-            θ_first, θ_last = mod(step - 0.5*Δθ, 360.0), mod(step + 0.5*Δθ, 360.0)
-            idxθ = if θ_first < θ_last
-                    findall(i -> (i >= θ_first) && (i <= θ_last), θ)
-                else
-                    findall(i -> (i >= θ_first) || (i <= θ_last), θ)
+        append!(d, getwidth(r, θ, ϕ, Δθ=Δθ, tol=tol))
+    end
+    return d
+end
+
+function getwidth(r::Vector{Float64}, θ::Vector{Float64}, ϕ::Vector{Float64}; Δθ=1.0, tol=0.05)
+    radii = Float64[]
+    for angle in 0.0:Δθ:360.0
+        θi, θf = mod(angle - 0.5*Δθ, 360.0), mod(angle + 0.5*Δθ, 360.0)
+        idxθ = θi < θf ? findall(i -> (i >= θi) && (i <= θf), θ) : findall(i -> (i >= θi) || (i <= θf), θ)
+        radius, theta, phi = Vector{Float64}(undef, length(idxθ)), Vector{Float64}(undef, length(idxθ)), Vector{Float64}(undef, length(idxθ))
+        for idx in idxθ
+            ϕ1, ϕ2 = mod(ϕ[idx] - tol, 360.0), mod(ϕ[idx] + tol, 360.0)
+            idxϕ = ϕ1 < ϕ2 ? findall(i -> (i >= ϕ1) && (i <= ϕ2), ϕ) : findall(i -> (i >= ϕ1) || (i <= ϕ2), ϕ)
+            if isempty(idxϕ)
+                continue
             end
-            for idx in idxθ
-                idxϕ = findall(i -> (i >= ϕ[idx] - tol) && (i <= ϕ[idx] + tol), ϕ)
-                if isempty(idxϕ)
-                    continue
-                end
-                inv_r = r[idxϕ]; inv_θ = θ[idxϕ]; inv_ϕ = ϕ[idxϕ]
-                distances = @. sqrt((r)^2 + (inv_r)^2 - 2*(r)*(inv_r)*(sind(inv_ϕ)*sind(ϕ)*cosd(inv_θ-θ)+cosd(inv_ϕ)*cosd(ϕ)))
-                append!(d, median(distances))
-            end
+            iradii = argmax(r[idxϕ])
+            push!(radii, r[iradii])
+            push!(theta, θ[i])
+            push!(phi, ϕ[i])
         end
     end
     return d
 end
+
+# dΘ = std(diff(angle_info))
+# for j in eachindex(idx)
+#     tmp_radius = radii_info[j]; tmp_angle = angle_info[j];
+#     if tmp_angle < 180.0
+#         reciprocal_angle = tmp_angle + 180.0
+#     else
+#         reciprocal_angle = tmp_angle - 180.0
+#     end
+#     lower_bound = reciprocal_angle-dΘ
+#     upper_bound = reciprocal_angle+dΘ
+#     nearest_angles = findall(x ->
+#         (x >= lower_bound) && (x <= upper_bound), angle_info)
+#     median_idx = Int64(round(median(nearest_angles)))
+#     tmp_radius2 = radii_info[median_idx]
+#     push!(Θ, round(tmp_angle, digits=3))
+#     push!(diameter, round(tmp_radius+tmp_radius2, digits=3))
+# end
 
 function fibrilradii(
     pdb::String,
