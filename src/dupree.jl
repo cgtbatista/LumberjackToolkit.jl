@@ -280,7 +280,8 @@ function getwidth(r::Vector{Float64}, θ::Vector{Float64}, ϕ::Vector{Float64}; 
     for angle in 0.0:Δθ:360.0
         θi, θf = mod(angle - 0.5*Δθ, 360.0), mod(angle + 0.5*Δθ, 360.0)
         idxθ = θi < θf ? findall(i -> (i >= θi) && (i <= θf), θ) : findall(i -> (i >= θi) || (i <= θf), θ)
-        radius, theta, phi = Vector{Float64}(undef, length(idxθ)), Vector{Float64}(undef, length(idxθ)), Vector{Float64}(undef, length(idxθ))
+        radius = Vector{Float64}(undef, length(idxθ))
+        token = 1
         for idx in idxθ
             ϕ1, ϕ2 = mod(ϕ[idx] - tol, 360.0), mod(ϕ[idx] + tol, 360.0)
             idxϕ = ϕ1 < ϕ2 ? findall(i -> (i >= ϕ1) && (i <= ϕ2), ϕ) : findall(i -> (i >= ϕ1) || (i <= ϕ2), ϕ)
@@ -288,12 +289,17 @@ function getwidth(r::Vector{Float64}, θ::Vector{Float64}, ϕ::Vector{Float64}; 
                 continue
             end
             iradii = argmax(r[idxϕ])
-            push!(radii, r[iradii])
-            push!(theta, θ[i])
-            push!(phi, ϕ[i])
+            radius[token] = r[iradii]
+            println("Angle: $(θ[idx]) - Radius: $(r[iradii]) - Φ: $(ϕ[iradii])")
+            token += 1
         end
+        if isempty(radius)
+            continue
+        end
+        push!(radii, median(radius))
+        println("")
     end
-    return d
+    return 2 * radii
 end
 
 # dΘ = std(diff(angle_info))
