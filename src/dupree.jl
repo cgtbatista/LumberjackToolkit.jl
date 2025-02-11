@@ -242,7 +242,7 @@ end
 
 function fibrilwidth(
     pdbname::String;
-    Δz=1.0, Δθ=1.0, tol=0.5, isreference=false,
+    Δz=1.0, step=1.0, tol=0.5, isreference=false,
     psfname=nothing, vdw_radii=nothing,
     surface_parameters="-res 0.6 -cutoff 4.0", vmd="vmd"
 )
@@ -256,50 +256,105 @@ function fibrilwidth(
         throw(ArgumentError("The tolerance should be less than half of the Δz."))
     end
     xyz = filterSTL(stl)
-    return scan_diameter(xyz, fibril_centers, Δθ=Δθ, tol=tol)
+    return scan_diameter(xyz, fibril_centers, step=step, tol=tol)
 end
 
-function scan_diameter(xyz::Vector{SVector{3, Float64}}, centers::Vector{SVector{3, Float64}}; Δθ=1.0, tol=0.05)
-    d = Float64[]
+function scan_diameter(xyz::Vector{SVector{3, Float64}}, centers::Vector{SVector{3, Float64}}; step=1.0, tol=0.05)
+    d, azimuth, inclination = Float64[], Float64[], Float64[]
     for center in centers
         isurface = findall(k -> norm(k - center[3]) <= tol, [ ijk[3] for ijk in xyz ])
         surface = [ surf - center for surf in xyz[isurface] ]
         r = norm.(surface)
         x, y, z = [ s[1] for s in surface ], [ s[2] for s in surface ], [ s[3] for s in surface ]
         norm_xy = norm.([ s[1:2] for s in surface ])
-        θ = sign.(y) .* acosd.(x ./ norm_xy)
-        ϕ = acosd.(z ./ r)
-        θ, ϕ = mod.(θ, 360.), mod.(ϕ, 360.)
-        append!(d, getwidth(r, θ, ϕ, Δθ=Δθ, tol=tol))
+        ϕ = mod.(
+            sign.(y) .* acosd.(x ./ norm_xy),
+            360.0
+        )
+        θ = mod.(
+            acosd.(z ./ r),
+            360.0
+        )
+        a, b, c = getradii(r, ϕ, θ, step=step, tol=tol)
+        append!(d, a); append!(azimuth, b); append!(inclination, c)
     end
-    return d
+    return d, azimuth, inclination
 end
 
-function getwidth(r::Vector{Float64}, θ::Vector{Float64}, ϕ::Vector{Float64}; Δθ=1.0, tol=0.05)
-    radii = Float64[]
-    for angle in 0.0:Δθ:360.0
-        θi, θf = mod(angle - 0.5*Δθ, 360.0), mod(angle + 0.5*Δθ, 360.0)
-        idxθ = θi < θf ? findall(i -> (i >= θi) && (i <= θf), θ) : findall(i -> (i >= θi) || (i <= θf), θ)
-        radius = Vector{Float64}(undef, length(idxθ))
+# function scan_diameter(xyz::Vector{SVector{3, Float64}}, centers::Vector{SVector{3, Float64}}; Δθ=1.0, tol=0.05)
+#     d = Float64[]
+#     for center in centers
+#         isurface = findall(k -> norm(k - center[3]) <= tol, [ ijk[3] for ijk in xyz ])
+#         surface = [ surf - center for surf in xyz[isurface] ]
+#         r = norm.(surface)
+#         x, y, z = [ s[1] for s in surface ], [ s[2] for s in surface ], [ s[3] for s in surface ]
+#         norm_xy = norm.([ s[1:2] for s in surface ])
+#         θ = sign.(y) .* acosd.(x ./ norm_xy)
+#         ϕ = acosd.(z ./ r)
+#         θ, ϕ = mod.(θ, 360.), mod.(ϕ, 360.)
+#         append!(d, getwidth(r, θ, ϕ, step=Δθ, tol=tol))
+#     end
+#     return d
+# end
+
+# function getwidth(r::Vector{Float64}, θ::Vector{Float64}, ϕ::Vector{Float64}; Δθ=1.0, tol=0.05)
+#     radii = Float64[]
+#     for angle in 0.0:Δθ:360.0
+#         θi, θf = mod(angle - 0.5*Δθ, 360.0), mod(angle + 0.5*Δθ, 360.0)
+#         idxθ = θi < θf ? findall(i -> (i >= θi) && (i <= θf), θ) : findall(i -> (i >= θi) || (i <= θf), θ)
+#         rtemp, theta, phi = Vector{Float64}(undef, length(idxθ)), Vector{Float64}(undef, length(idxθ)), Vector{Float64}(undef, length(idxθ))
+#         token = 1
+#         for idx in idxθ
+#             ϕ1, ϕ2 = mod(ϕ[idx] - tol, 360.0), mod(ϕ[idx] + tol, 360.0)
+#             idxϕ = ϕ1 < ϕ2 ? findall(i -> (i >= ϕ1) && (i <= ϕ2), ϕ) : findall(i -> (i >= ϕ1) || (i <= ϕ2), ϕ)
+#             if isempty(idxϕ)
+#                 continue
+#             end
+#             iradii = argmax(r[idxϕ])
+#             rtemp[token] = r[iradii]
+#             println("Angle: $(θ[idx]) - Radius: $(r[iradii]) - Φ: $(ϕ[iradii])")
+#             token += 1
+#         end
+#         if isempty(rtemp)
+#             continue
+#         else
+#             push!(radii, median(rtemp))
+#         end
+#         println("")
+#     end
+#     return 2 * radii
+# end
+
+function getradii(
+    radii::Vector{Float64},
+    azimuthal::Vector{Float64},
+    polar::Vector{Float64};
+    step=1.0, tol=0.05
+)
+    ρ, ϕ, θ = Float64[], Float64[], Float64[]
+    for angle in 0.0:step:360.0
+        a1, a2 = mod(angle - .5*step, 360.0), mod(angle + .5*step, 360.0)
+        idxa = a1 < a2 ? findall(i -> (i >= a1) && (i <= a2), azimuthal) : findall(i -> (i >= a1) || (i <= a2), azimuthal)
+        r, inclination = Vector{Float64}(undef, length(idxa)), Vector{Float64}(undef, length(idxa))
         token = 1
-        for idx in idxθ
-            ϕ1, ϕ2 = mod(ϕ[idx] - tol, 360.0), mod(ϕ[idx] + tol, 360.0)
-            idxϕ = ϕ1 < ϕ2 ? findall(i -> (i >= ϕ1) && (i <= ϕ2), ϕ) : findall(i -> (i >= ϕ1) || (i <= ϕ2), ϕ)
-            if isempty(idxϕ)
+        for idx in idxa
+            p1, p2 = mod(polar[idx] - tol, 360.0), mod(polar[idx] + tol, 360.0)
+            idxp = p1 < p2 ? findall(i -> (i >= p1) && (i <= p2), polar) : findall(i -> (i >= p1) || (i <= p2), polar)
+            if isempty(idxp)
                 continue
             end
-            iradii = argmax(r[idxϕ])
-            radius[token] = r[iradii]
-            println("Angle: $(θ[idx]) - Radius: $(r[iradii]) - Φ: $(ϕ[iradii])")
+            imax = argmax(radii[idxp])
+            r[token], inclination[token] = radii[imax], polar[imax]
             token += 1
         end
-        if isempty(radius)
+        if isempty(r)
             continue
+        else
+            push!(ρ, median(r)); push!(ϕ, angle); push!(θ, median(inclination))
         end
-        push!(radii, median(radius))
         println("")
     end
-    return 2 * radii
+    return ρ, ϕ, θ
 end
 
 # dΘ = std(diff(angle_info))
