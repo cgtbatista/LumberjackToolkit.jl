@@ -134,7 +134,7 @@ function filterSTL(stlname::String)
     return unique(STL)
 end
 
-function chain_centers(pdbname::String; Δz::Float64=0.1, cutoff::Float64=0.5, isreference::Bool=true)
+function chain_centers(pdbname::String; Δz::Float64=1.0, cutoff::Float64=0.5, isreference::Bool=true)
     center = Vector{SVector{3, Float64}}()
     atoms = PDBTools.readPDB(pdbname)
     monomers = PDBTools.resnum.(atoms)
@@ -182,7 +182,7 @@ function fibrilwidth(
 end
 
 function scan_diameter(xyz::Vector{SVector{3, Float64}}, centers::Vector{SVector{3, Float64}}; step=1.0, tol=0.05)
-    d, Φ, Θ = Float64[], Float64[], Float64[]
+    d, Φ, Θ = Vector{Float64}[], Vector{Float64}[], Vector{Float64}[]
     for center in centers
         isurface = findall(k -> norm(k - center[3]) <= tol, [ ijk[3] for ijk in xyz ])
         surface = [ surf - center for surf in xyz[isurface] ]
@@ -198,10 +198,64 @@ function scan_diameter(xyz::Vector{SVector{3, Float64}}, centers::Vector{SVector
             360.0
         )
         r, azimuth, inclination = getradii(r, ϕ, θ, step=step, tol=tol)
-        append!(d, r); append!(Φ, azimuth); append!(Θ, inclination)
+        push!(d, r); push!(Φ, azimuth); push!(Θ, inclination)
     end
-    return d, Φ, Θ  ## I will remove the inlcination later, cause I only need the azimuthal angle to calculate the diameter
+    #return d, Φ, Θ  ## I will remove the inlcination later, cause I only need the azimuthal angle to calculate the diameter
+    return radii2diameter(d, Φ)
 end
+
+function radii2diameter(radii::Vector{Vector{Float64}}, angles::Vector{Vector{Float64}})
+    diameters = Float64[]
+    for istep in eachindex(radii, angles)
+        r_slices, ϕ_slices = radii[istep], angles[istep]
+        for (ri, ϕi) in zip(r_slices, ϕ_slices)
+            ϕf = mod(ϕi + 180.0, 360.0)
+            idx = findfirst(ϕ -> ϕ == ϕf, ϕ_slices)
+            if !isnothing(idx)
+                append!(diameters, ri + r_slices[idx])
+            else
+                idx1, idx2 = if ϕf ≈ 0.0 || ϕf ≈ 360.0
+                        findfirst(ϕ -> ϕ > 0.0, ϕ_slices), findlast(ϕ -> ϕ < 360.0, ϕ_slices)
+                    else
+                        findfirst(ϕ -> ϕ > ϕf, ϕ_slices), findlast(ϕ -> ϕ < ϕf, ϕ_slices)
+                end
+                if !isnothing(idx1) && !isnothing(idx2)
+                    ϕ1, ϕ2 = ϕ_slices[idx1], ϕ_slices[idx2]
+                    r1, r2 = r_slices[idx1], r_slices[idx2]
+                    rf = r1 + (r2 - r1) * (ϕf - ϕ1) / (ϕ2 - ϕ1)
+                    append!(diameters, ri + rf)
+                end
+            end    
+        end
+    end    
+    return diameters
+end
+
+
+
+# function radii2diameter(radii::Vector{Vector{Float64}}, angles::Vector{Vector{Float64}})
+#     diameters = Float64[]
+#     for istep in eachindex(radii, angles)
+#         slice_radii, slice_angles = radii[istep], angles[istep]
+#         for (ri, ϕi) in zip(slice_radii, slice_angles)
+#             ϕf = mod(ϕi + 180.0, 360.0)
+#             idx = findfirst(ϕ -> ϕ == ϕf, angles[istep])
+#             if !isnothing(idx)
+#                 append!(diameters, ri + radii[istep][idx])
+#             else
+#                 idx1, idx2 = if iszero(ϕf) || iszero(ϕf - 360.0)
+#                     findfirst(ϕ -> ϕ > 0.0, angles[istep]), findlast(ϕ -> ϕ < 360.0, angles[istep])
+#                 else
+#                     findfirst(ϕ -> ϕ > ϕf, angles[istep]), findlast(ϕ -> ϕ < ϕf, angles[istep])
+#                 end
+#                 idx1 = isnothing(idx1) ? 1 : idx1
+#                 idx2 = isnothing(idx2) ? 1 : idx2
+#                 append!(diameters, ri + mean([ radii[istep][idx1], radii[istep][idx2] ])) ## check if is getting right
+#             end    
+#         end
+#     end    
+#     return diameters
+# end
 
 function getradii(
     radii::Vector{Float64},
@@ -236,10 +290,12 @@ function getradii(
 end
 
 function edp(
-    psfname::String,
     pdbname::String;
+    Δz=1.0, step=1.0, tol=0.5, isreference=false,
+    psfname=nothing, vdw_radii=nothing
     )
-
+    ρ = Vector{Float64}[]
+end
 # function fibrilradii(
 #     pdb::String,
 #     file::String;
