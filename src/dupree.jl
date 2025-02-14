@@ -134,7 +134,7 @@ function filterSTL(stlname::String)
     return unique(STL)
 end
 
-function chain_centers(pdbname::String; Δz::Float64=1.0, cutoff::Float64=0.5, isreference::Bool=true)
+function chain_centers(pdbname::String; step::Float64=1.0, cutoff::Float64=0.5, isreference::Bool=true)
     center = Vector{SVector{3, Float64}}()
     atoms = PDBTools.readPDB(pdbname)
     monomers = PDBTools.resnum.(atoms)
@@ -146,7 +146,7 @@ function chain_centers(pdbname::String; Δz::Float64=1.0, cutoff::Float64=0.5, i
         )
     displace = p_last - p_first
     norm_displace = norm(displace)
-    for i in 0:Δz:norm_displace
+    for i in 0:step:norm_displace
         icenter = p_first .+ i * (displace/norm_displace)
         if isreference
             push!(center, icenter)
@@ -165,7 +165,7 @@ end
 function fibrilwidth(
     pdbname::String;
     selection="not water",
-    Δz=1.0, step=1.0, tol=0.5, isreference=false,
+    step=1.0, tol=0.5, isreference=false,
     psfname=nothing, vdw_radii=nothing,
     surface_parameters="-res 0.6 -cutoff 4.0", vmd="vmd"
 )
@@ -173,10 +173,10 @@ function fibrilwidth(
         pdbname, selection=selection, psfname=psfname, vdw_radii=vdw_radii, parameters=surface_parameters, vmd=vmd
     )[2]
     fibril_centers = chain_centers(
-        pdbname, Δz=Δz, cutoff=0.5*Δz, isreference=isreference
+        pdbname, step=step, cutoff=0.5*step, isreference=isreference
     )
-    if 2*tol > Δz
-        throw(ArgumentError("The tolerance should be less than half of the Δz, at least, equal to it."))
+    if 2*tol > step
+        throw(ArgumentError("The tolerance should be less than half of the step, at least, equal to it."))
     end
     xyz = filterSTL(stl)
     return scan_diameter(xyz, fibril_centers, step=step, tol=tol)
@@ -204,59 +204,6 @@ function scan_diameter(xyz::Vector{SVector{3, Float64}}, centers::Vector{SVector
     #return d, Φ, Θ  ## I will remove the inlcination later, cause I only need the azimuthal angle to calculate the diameter
     return radii2diameter(d, Φ)
 end
-
-function radii2diameter(radii::Vector{Vector{Float64}}, angles::Vector{Vector{Float64}})
-    diameters = Float64[]
-    for istep in eachindex(radii, angles)
-        r_slices, ϕ_slices = radii[istep], angles[istep]
-        for (ri, ϕi) in zip(r_slices, ϕ_slices)
-            ϕf = mod(ϕi + 180.0, 360.0)
-            idx = findfirst(ϕ -> ϕ == ϕf, ϕ_slices)
-            if !isnothing(idx)
-                append!(diameters, ri + r_slices[idx])
-            else
-                idx1, idx2 = if ϕf ≈ 0.0 || ϕf ≈ 360.0
-                        findfirst(ϕ -> ϕ > 0.0, ϕ_slices), findlast(ϕ -> ϕ < 360.0, ϕ_slices)
-                    else
-                        findfirst(ϕ -> ϕ > ϕf, ϕ_slices), findlast(ϕ -> ϕ < ϕf, ϕ_slices)
-                end
-                if !isnothing(idx1) && !isnothing(idx2)
-                    ϕ1, ϕ2 = ϕ_slices[idx1], ϕ_slices[idx2]
-                    r1, r2 = r_slices[idx1], r_slices[idx2]
-                    rf = r1 + (r2 - r1) * (ϕf - ϕ1) / (ϕ2 - ϕ1)
-                    append!(diameters, ri + rf)
-                end
-            end    
-        end
-    end    
-    return diameters
-end
-
-
-
-# function radii2diameter(radii::Vector{Vector{Float64}}, angles::Vector{Vector{Float64}})
-#     diameters = Float64[]
-#     for istep in eachindex(radii, angles)
-#         slice_radii, slice_angles = radii[istep], angles[istep]
-#         for (ri, ϕi) in zip(slice_radii, slice_angles)
-#             ϕf = mod(ϕi + 180.0, 360.0)
-#             idx = findfirst(ϕ -> ϕ == ϕf, angles[istep])
-#             if !isnothing(idx)
-#                 append!(diameters, ri + radii[istep][idx])
-#             else
-#                 idx1, idx2 = if iszero(ϕf) || iszero(ϕf - 360.0)
-#                     findfirst(ϕ -> ϕ > 0.0, angles[istep]), findlast(ϕ -> ϕ < 360.0, angles[istep])
-#                 else
-#                     findfirst(ϕ -> ϕ > ϕf, angles[istep]), findlast(ϕ -> ϕ < ϕf, angles[istep])
-#                 end
-#                 idx1 = isnothing(idx1) ? 1 : idx1
-#                 idx2 = isnothing(idx2) ? 1 : idx2
-#                 append!(diameters, ri + mean([ radii[istep][idx1], radii[istep][idx2] ])) ## check if is getting right
-#             end    
-#         end
-#     end    
-#     return diameters
-# end
 
 function getradii(
     radii::Vector{Float64},
@@ -290,192 +237,269 @@ function getradii(
     return ρ, ϕ, θ
 end
 
-function edp(
-    pdbname::String;
-    Δz=1.0, step=1.0, tol=0.5, isreference=false,
-    psfname=nothing, vdw_radii=nothing
-    )
-    ρ = Vector{Float64}[]
+function radii2diameter(radii::Vector{Vector{Float64}}, angles::Vector{Vector{Float64}})
+    diameters = Float64[]
+    for istep in eachindex(radii, angles)
+        r_slices, ϕ_slices = radii[istep], angles[istep]
+        scanning = Dict{Tuple{Float64, Float64}, Float64}()
+        for (ri, ϕi) in zip(r_slices, ϕ_slices)
+            ϕi_norm = mod(ϕi, 360.0)    ## to avoid double counting the same angle (i.e. 0 and 360)
+            ϕf = mod(ϕi_norm + 180.0, 360.0)
+            if haskey(scanning, (ϕi_norm, ϕf)) || haskey(scanning, (ϕf, ϕi_norm))
+                continue
+            end
+            idx = findfirst(ϕ -> ϕ == ϕf, ϕ_slices)
+            if !isnothing(idx)
+                scanning[(ϕi_norm, ϕf)] = ri + r_slices[idx]
+            else
+                idx1, idx2 = if ϕf ≈ 0.0 || ϕf ≈ 360.0
+                        findfirst(ϕ -> ϕ > 0.0, ϕ_slices), findlast(ϕ -> ϕ < 360.0, ϕ_slices)
+                    else
+                        findfirst(ϕ -> ϕ > ϕf, ϕ_slices), findlast(ϕ -> ϕ < ϕf, ϕ_slices)
+                end
+                if !isnothing(idx1) && !isnothing(idx2)
+                    ϕ1, ϕ2 = ϕ_slices[idx1], ϕ_slices[idx2]
+                    r1, r2 = r_slices[idx1], r_slices[idx2]
+                    scanning[(ϕi_norm, ϕf)] = ri + r1 + (r2 - r1) * (ϕf - ϕ1) / (ϕ2 - ϕ1)
+                end
+            end    
+        end
+        if !isempty(scanning)
+            append!(diameters, values(scanning))
+        end
+    end    
+    return diameters
 end
-# function fibrilradii(
-#     pdb::String,
-#     file::String;
-#     Δz=0.01,
-#     steps=false, Δstep=0.1
-# )
-#     if (steps == true) && (Δstep == 0.0)
-#         throw(ArgumentError("The Δstep must be greater than zero."))
-#     end
-#     if Δstep <= Δz
-#         throw(ArgumentError("The Δstep ($Δstep Å) should be greater than Δz ($Δz Å) to avoid duplicate radius quantification."))
-#     end
-#     atoms = PDBTools.readPDB(pdb)
-#     lower_cutoff = mean([
-#             atom.z for atom in PDBTools.select(atoms, atom -> atom.resnum == minimum(PDBTools.resnum.(atoms)))
-#         ])
-#     upper_cutoff = mean([
-#             atom.z for atom in PDBTools.select(atoms, atom -> atom.resnum == maximum(PDBTools.resnum.(atoms)))
-#         ])
-#     data = readdlm(file)
-#     xyz = unique(
-#             [ [irow[1], irow[2], irow[3]] for irow in eachrow(data) ]
-#         )
-#     zaxis = [ ijk[3] for ijk in xyz ]
-#     xyz, zaxis, ztoken = xyz[sortperm(zaxis)], zaxis[sortperm(zaxis)], 0.
-#     r = Float64[]; ϕ = Float64[]; θ = Float64[]; central_vectors = Vector{Float64}[]; labels = Int64[];
-#     for (i, z) in enumerate(zaxis)
-#         if (z < lower_cutoff) || (z > upper_cutoff)
-#             continue
-#         end
-#         if any(test -> test == true, steps)
-#             if (i != 1)
-#                 if abs(z-ztoken) < Δstep
-#                     continue
-#                 else
-#                     ztoken = z
-#                 end
-#             else
-#                 ztoken = z
-#             end
-#         end
-#         Δatoms = PDBTools.select(atoms, atom -> (atom.z >= z - Δz) && (atom.z <= z + Δz))
-#         xyz0 = [ mean([ xyz[1] for xyz in PDBTools.coor(Δatoms) ]), mean([ xyz[2] for xyz in PDBTools.coor(Δatoms) ]), mean([ xyz[3] for xyz in PDBTools.coor(Δatoms) ]) ]
-#         if isnan(mean(xyz0)); continue; end
-#         push!(central_vectors, xyz0)
-#         for idx in findall(z -> (z >= z - Δz) && (z <= z + Δz), zaxis)
-#             ## picking {r, θ, ϕ} -- following the physical spherical coordinates classification as { radius, azimuthal, polar }
-#             vector_xyz = xyz[idx] - xyz0
-#             idx_r = norm(vector_xyz)
-#             idx_θ = sign(vector_xyz[2])*acosd(vector_xyz[1]/norm(vector_xyz[1:2]))
-#             idx_ϕ = acosd(vector_xyz[3]/norm(vector_xyz))
-#             if idx_θ < 0; idx_θ += 360; end
-#             if idx_ϕ < 0; idx_ϕ += 360; end
-#             ## pushing the data
-#             push!(r, idx_r); push!(θ, idx_θ); push!(ϕ, idx_ϕ); push!(labels, i)
-#         end
-#     end
-#     return xyz, central_vectors, labels, [ r, θ, ϕ ]
-# end
-# 
-# function get_diameters(radiidata::Vector{Vector{Float64}}; threshold=1.5, tolerance=0.05)
-#     ## The tolerance is related to the angle θ and the marginal error to be outsisde the plane of the fibril is related to the angle ϕ
-#     dθ = threshold; dϕ = tolerance;
-#     diameters = Float64[]
-#     for ith in eachindex(radiidata[1])
-#         r = radiidata[1][ith]; θ = radiidata[2][ith]; ϕ = radiidata[3][ith];
-#         new_θ = θ + 180.; lower_bound = mod(new_θ - dθ, 360.); upper_bound = mod(new_θ + dθ, 360.);
-#         if lower_bound < upper_bound
-#             raw_idx = findall(θi -> θi >= lower_bound && θi <= upper_bound, radiidata[2])
-#         else
-#             raw_idx = findall(θi -> θi >= lower_bound || θi <= upper_bound, radiidata[2])
-#         end
-#         idx = findall(ϕi -> ϕi >= mod(ϕ - dϕ, 360) && ϕi <= mod(ϕ + dϕ, 360), radiidata[3][raw_idx])
-#         if length(idx) == 0
-#             continue
-#         else
-#             inv_r = radiidata[1][idx]; inv_θ = radiidata[2][idx]; inv_ϕ = radiidata[3][idx]
-#             distances = @. sqrt((r)^2 + (inv_r)^2 - 2*(r)*(inv_r)*(sind(inv_ϕ)*sind(ϕ)*cosd(inv_θ-θ)+cosd(inv_ϕ)*cosd(ϕ)))
-#             push!(diameters, median(distances))
-#         end
-#     end
-#     return diameters
-# end
-# 
-# function teste2(;data="/home/carlos/Documents/Sandbox/paul/cellulose.dat", nbins=100)
-#     xyz = readdlm(data)
-#     x, y, z = xyz[:,1], xyz[:,2], xyz[:,3]
-#     zmin, zmax = extrema(z)
-#     bin_edges = range(
-#         zmin,
-#         zmax,
-#         length=nbins+1
-#     )
-#     diameters = Float64[]
-#     for i in 1:nbins
-#         lower = bin_edges[i]
-#         upper = i < nbins ? bin_edges[i+1] : zmax + eps()
-#         mask = (z .>= lower) .& (z .< upper)
-#         slice_x = x[mask]
-#         slice_y = y[mask]
-#         length(slice_x) < 2 && continue ## skip if there are less than 2 points
-#         d = 0.0
-#         n_pontos = length(slice_x)
-#         for j in 1:n_pontos
-#             for k in (j+1):n_pontos
-#                 dist = hypot(slice_x[j] - slice_x[k], slice_y[j] - slice_y[k])
-#                 d = max(d, dist)
-#             end
-#         end
-#         
-#         push!(diameters, d)
-#     end
-#     
-#     # Gerar histograma
-#     Plots.histogram(diameters, bins=20, xlabel="Diâmetro", ylabel="Frequência",
-#              title="Distribuição de Diâmetros", legend=false)
-#     
-#     return (d_mean = mean(diameters),
-#             d_media = median(diameters),
-#             d_sd = std(diameters),
-#             hist = Plots.current())
-# end
-# 
-# function diameter_analysis(;fibrildata="/home/carlos/Documents/Sandbox/paul/m23432_data.dat")
-#     data = readdlm(fibrildata, ',')
-#     Θ, diameter, dresidues = [], [], convert(Vector{Int64}, data[:,1])
-#     dΘ = missing
-#     for i in unique(dresidues)
-#         idx = findall(x -> x == i, dresidues)
-#         radii_info = data[idx,2]
-#         angle_info = data[idx,3]
-#         for idx_angle in eachindex(angle_info)
-#             if angle_info[idx_angle] < 0.0
-#                 angle_info[idx_angle] = angle_info[idx_angle] + 360.0
-#             end
-#         end
-#         dΘ = std(diff(angle_info))
-#         for j in eachindex(idx)
-#             tmp_radius = radii_info[j]; tmp_angle = angle_info[j];
-#             if tmp_angle < 180.0
-#                 reciprocal_angle = tmp_angle + 180.0
-#             else
-#                 reciprocal_angle = tmp_angle - 180.0
-#             end
-#             lower_bound = reciprocal_angle-dΘ
-#             upper_bound = reciprocal_angle+dΘ
-#             nearest_angles = findall(x ->
-#                 (x >= lower_bound) && (x <= upper_bound), angle_info)
-#             median_idx = Int64(round(median(nearest_angles)))
-#             tmp_radius2 = radii_info[median_idx]
-#             push!(Θ, round(tmp_angle, digits=3))
-#             push!(diameter, round(tmp_radius+tmp_radius2, digits=3))
-#         end
-#     end
-# 
-#     Θ = convert(Vector{Float64}, Θ)
-#     diameter = convert(Vector{Float64}, diameter)
-# 
-#     return dresidues, diameter, Θ
-# 
-# end
 
-# if centermethods == "real"
-#     selstructure = select(structure, by = atoms -> (atoms.z >= lower_bound) && (atoms.z <= upper_bound))
-#     xyz0 = [ mean([ x[1] for x in coor(selstructure) ]), mean([ y[2] for y in coor(selstructure) ]), mean([ z[3] for z in coor(selstructure) ]) ];        
-# elseif centermethods == "imaginary"
-#     pdbresids = resnum.(structure); coordinates = coor(structure);
-#     x = [ i[1] for i in coordinates ]; y = [ j[2] for j in coordinates ]; z = [ k[3] for k in coordinates ];
-#     initial_idx = findall(resids -> resids == minimum(pdbresids), pdbresids); x0 = mean(x[initial_idx]); y0 = mean(y[initial_idx]); z0 = mean(z[initial_idx]);
-#     final_idx   = findall(resids -> resids == maximum(pdbresids), pdbresids); x1 = mean(x[final_idx]); y1 = mean(y[final_idx]); z1 = mean(z[final_idx]);
-#     vectorx = [ x1-x0, y1-y0, z1-z0 ]; norm_vector = norm(vectorx);
-#     dteste = collect(0.:dz:norm_vector); xteste = randn(length(dteste)); yteste = randn(length(dteste)); zteste = randn(length(dteste));
-#     for i in eachindex(dteste)
-#         xteste[i] = x0 + dteste[i]*vectorx[1]/norm_vector
-#         yteste[i] = y0 + dteste[i]*vectorx[2]/norm_vector
-#         zteste[i] = z0 + dteste[i]*vectorx[3]/norm_vector
-#     end
-#     selstructure = findall(ithz -> (ithz >= lower_bound) && (ithz <= upper_bound), zteste)
-#     xyz0 = [ mean(xteste[selstructure]), mean(yteste[selstructure]), mean(zteste[selstructure]) ]
-# else
-#     throw(ArgumentError("The method $method is not implemented."))
-# end
+##################################################################################################################################################
+## pdb = "/home/user/Documents/FibrilWidth/setup/system.pdb"
+## dcd = "/home/user/Documents/FibrilWidth/output/prod_NpT.dcd"
+function edp(
+    pdbname::String, trjname::String; psfname=nothing,
+    selection="not water", align_selection="resname BGLC", axis="z", Δ=1.0, tol=0.5,
+    first=1, last=nothing, step=1.0
+    )
+    if !in(lowercase(z), Set(["x", "y", "z", "xy", "xz", "yz", "yx", "zx", "zy"]))
+        throw(ArgumentError("""
+        The axis should be associated with the labels of cartesian axes or plane.
+        Please insert it such as: `x`, `y`, `z`, `xy`, `xz`, or `yz`.
+        """))
+    end
+    psfname = isnothing(psfname) ? replace(pdbname, ".pdb" => ".psf") : psfname
+    new_trjname = align_frames(psfname, trjname, selection=align_selection)
+    atoms = PDBTools.select(PDBTools.readPDB(pdbname), selection)
+    sim = MolSimToolkit.Simulation(
+        atoms, new_trjname,
+        first=first, last=last, step=step
+    )
+    q = chargesPSF(psfname)[PDBTools.index.(atoms)]
+    ndims = length(axis)
+    if ndims == 1
+        return ρ_1D()
+    else
+        throw(ArgumentError("The axis should be a string with one or two characters."))
+    end
+end
+
+function chargesPSF(psfname::String)
+    q = Vector{Float64}()
+    natoms = 0.0
+    open(psfname) do file
+        for line in eachline(file)
+            if occursin("!NATOM", line)
+                natoms = parse(Float64, string(split(line)[begin]))
+                continue
+            end
+            if iszero(natoms)
+                continue
+            else
+                qi = string(split(line)[7])
+                push!(q, parse(Float64, qi))
+                natoms -= 1
+            end
+        end
+    end
+    return q
+end
+
+function δbin(value::Float64, lower::Float64, upper::Float64)
+    if lower <= value < upper
+        return 1
+    else
+        return 0
+    end
+end
+
+function ρ_1D(sim::MolSimToolkit.Simulation; axis="z", Δ=1.0)
+    axescode = Dict{String, Int64}("x" => 1, "y" => 2, "z" => 3)
+    ax = if haskey(axescode, lowercase(axis))
+            axescode[axis]
+        else
+            throw(ArgumentError("The axis should be associated with the labels of cartesian axes."))
+    end
+    Vslab, bins = binning(sim, axis=axis, Δ=Δ)
+    densities = Vector{Vector{Float64}}(undef, length(sim))
+    for frame in sim
+        coord = [ xyz[ax] for xyz in MolSimToolkit.positions(frame) ]
+        densities[sim.frame_index] = ρbins(bins, coord, q)
+    end
+    return densities
+end
+
+function ρbins(bins::Vector{Float64}, coords::Vector{Float64}, q::Vector{Float64}; N=nothing, σ=nothing)
+    N = isnothing(N) ? length(coords) : N
+    σ = isnothing(σ) ? ones(length(coords)) : σ
+    density = zeros(Float64, length(bins))
+    for (i, bin) in enumerate(bins)
+        if lastindex(bins) == i
+            break
+        end
+        δ = δbin.(coords, bin, bins[i+1])
+        electron = eprofile(coords, q, σ)
+        density[i] = N \ sum(δ .* electron)
+    end
+    return density
+end
+
+function eprofile(coords::Vector{Float64}, q::Vector{Float64}, σ::Vector{Float64})
+    A = q ./ sqrt(2π * σ.^2)
+    return A .* exp.(-0.5 * ((coords .- mean(coords)) ./ σ).^2)
+end
+
+function binspecs(axis::String; lower=@SVector(zeros(3)), upper=@SVector(zeros(3)), Δ=1.0)
+    axis = split(lowercase(axis), "")
+    if length(axis) == 1
+        dict = Dict{String, Function}(
+            "x" => () -> (Δ*(upper[2]-lower[2])*(upper[3]-lower[3]), collect(lower[1]:Δ:upper[1])),
+            "y" => () -> (Δ*(upper[1]-lower[1])*(upper[3]-lower[3]), collect(lower[2]:Δ:upper[2])),
+            "z" => () -> (Δ*(upper[1]-lower[1])*(upper[2]-lower[2]), collect(lower[3]:Δ:upper[3]))
+        )
+        return dict[axis[1]]()
+    elseif length(axis) == 2
+        dict = Dict{Tuple{String, String}, Function}([
+            [("x", "y"), ("y", "x")] .=> () -> (Δ*(upper[3]-lower[3]), collect(lower[1]:Δ:upper[1]), collect(lower[2]:Δ:upper[2]));
+            [("x", "z"), ("z", "x")] .=> () -> (Δ*(upper[2]-lower[2]), collect(lower[1]:Δ:upper[1]), collect(lower[3]:Δ:upper[3]));
+            [("y", "z"), ("z", "y")] .=> () -> (Δ*(upper[1]-lower[1]), collect(lower[2]:Δ:upper[2]), collect(lower[3]:Δ:upper[3]))
+        ])
+        return dict[(axis[1], axis[2])]()
+    end
+end
+
+function binning(sim::MolSimToolkit.Simulation; axis="z", Δ=1.0)
+    lower, upper = @SVector(zeros(3)), @SVector(zeros(3))
+    for frame in sim
+        xyz = MolSimToolkit.positions(frame)
+        if sim.frame_index == 1
+            lower[1], upper[1] = extrema([ ijk[1] for ijk in xyz ])
+            lower[2], upper[2] = extrema([ ijk[2] for ijk in xyz ])
+            lower[3], upper[3] = extrema([ ijk[3] for ijk in xyz ])
+        else
+            lower[1], upper[1] = min(lower[1], minimum([ ijk[1] for ijk in xyz ])), max(upper[1], maximum([ ijk[1] for ijk in xyz ]))
+            lower[2], upper[2] = min(lower[2], minimum([ ijk[2] for ijk in xyz ])), max(upper[2], maximum([ ijk[2] for ijk in xyz ]))
+            lower[3], upper[3] = min(lower[3], minimum([ ijk[3] for ijk in xyz ])), max(upper[3], maximum([ ijk[3] for ijk in xyz ]))
+        end
+    end
+    return binspecs(axis, lower=lower, upper=upper, Δ=Δ)
+end
+
+function adjust_binning(
+    sim::MolSimToolkit.Simulation;
+    selection="not water", axis="z", Δ=1.0,
+    hascenter=true, hassymmetry=true
+)
+    atoms = PDBTools.select(
+        MolSimToolkit.atoms(sim), selection
+    )
+end
+
+function _get_reference(simulation::MolSimToolkit.Simulation, selection::String)
+
+    xyz = MolSimToolkit.Point3D[]
+
+    reference_atoms = PDBTools.select(MolSimToolkit.atoms(simulation), selection)
+    idx = PDBTools.index.(reference_atoms)
+
+    for frame in simulation
+        append!(xyz, Statistics.mean(MolSimToolkit.positions(frame)[idx], dims=1))
+    end
+
+    return xyz
+end
+
+function _correct_center(bins::Vector{Float64}, reference::Float64)
+    
+    idx = findfirst(x -> x >= reference, bins)
+    center = 0.5*(bins[idx]+bins[idx-1])
+    centered_bins = average_bins(bins) .- center
+
+    return centered_bins
+end
+
+function _correct_symmetry(bins::Vector{Float64}, reference::Float64)
+    
+    symmetric_bins = Float64[]
+
+    min_threshold, max_threshold = extrema(bins)
+    resolution = (max_threshold - min_threshold) / (length(bins)-1)
+    ΔL = max_threshold - min_threshold - resolution
+
+    centered_bins = _correct_center(bins, reference)
+   
+    for i in eachindex(centered_bins)
+        if (sign(centered_bins[i]) == -1.) && (abs(centered_bins[i]) / (0.5*ΔL) > 1.)
+            push!(symmetric_bins, centered_bins[i] + ΔL)
+        elseif (sign(centered_bins[i]) == 1.) && (abs(centered_bins[i]) / (0.5*ΔL) > 1.)
+            push!(symmetric_bins, centered_bins[i] - ΔL)
+        else
+            push!(symmetric_bins, centered_bins[i])
+        end
+    end
+
+    return symmetric_bins
+end
+
+function _ordering_symmetry(bins::Vector{Float64}, ρ::Vector{Float64})
+    if issorted(bins)
+        return bins, ρ
+    else
+        sorted_idx = sortperm(bins)
+        new_bins, new_ρ = bins[sorted_idx], ρ[sorted_idx]
+        return new_bins, new_ρ
+    end
+end
+
+function align_frames(
+    psfname::String,
+    trjname::String; new_trajectory=nothing,
+    selection="not water", reference=0,
+    vmd="vmd", DebugVMD=false
+)    
+    new_trajectory = isnothing(new_trajectory) ? tempname() * ".dcd" : new_trajectory
+    tcl = tempname() * ".tcl"
+    Base.open(tcl, "w") do file
+        println(file, """
+        package require pbctools
+
+        mol new     $psfname
+        mol addfile $trjname waitfor all
+        
+        animate goto 0
+        pbc wrap -centersel \"$selection\" -center com -compound residue -all        
+        set ref_frame $reference
+        set ref_selection [atomselect top \"$selection\" frame \$ref_frame]
+
+        set num_frames [molinfo top get numframes]
+
+        for {set i 0} {\$i < \$num_frames} {incr i} {
+            set cur_selection [atomselect top \"$selection\" frame \$i]
+            set mat_trans [measure fit \$cur_selection \$ref_selection]
+            set sel_all [atomselect top "all" frame \$i]
+            \$sel_all move \$mat_trans
+        }
+
+        animate write dcd $new_trajectory
+        """)
+    end
+    vmdoutput = Base.read(`$vmd -dispdev text -e $tcl`, String)
+    return DebugVMD ? vmdoutput : new_trajectory
+end

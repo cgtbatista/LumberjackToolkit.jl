@@ -128599,4 +128599,4 @@ object 3 class array type double rank 0 items 385776 data follows
 4 4 4
 4 4 4
 
-object "distance (all) [A]" class field
+object "distance (not water) [A]" class field
