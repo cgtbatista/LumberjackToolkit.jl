@@ -164,18 +164,19 @@ end
 
 function fibrilwidth(
     pdbname::String;
+    selection="not water",
     Δz=1.0, step=1.0, tol=0.5, isreference=false,
     psfname=nothing, vdw_radii=nothing,
     surface_parameters="-res 0.6 -cutoff 4.0", vmd="vmd"
 )
     stl = cellulose_surface(
-        pdbname, psfname=psfname, vdw_radii=vdw_radii, parameters=surface_parameters, vmd=vmd
+        pdbname, selection=selection, psfname=psfname, vdw_radii=vdw_radii, parameters=surface_parameters, vmd=vmd
     )[2]
     fibril_centers = chain_centers(
         pdbname, Δz=Δz, cutoff=0.5*Δz, isreference=isreference
     )
     if 2*tol > Δz
-        throw(ArgumentError("The tolerance should be less than half of the Δz."))
+        throw(ArgumentError("The tolerance should be less than half of the Δz, at least, equal to it."))
     end
     xyz = filterSTL(stl)
     return scan_diameter(xyz, fibril_centers, step=step, tol=tol)
