@@ -257,6 +257,11 @@ end
 #     atom.segname == "F11" || atom.segname == "F12" || atom.segname == "F5"  || atom.segname == "F6"  || atom.segname == "F7"  || atom.segname == "F16"
 #     )
 # )
+##xylans = [ "XA17", "XB17", "XC17", "XA18", "XB18", "XC18", "XA19", "XB19", "XC19", "XA20", "XB20", "XC20", "XY1", "XY2", "XY3", "XY4", "XY5", "XY6", "XY7", "XY8", "XY9", "XY10", "XY11", "XY12", "XY13", "XY14", "XY15", "XY16", "XY21", "XY22" ]
+##xylans = [ "XA17", "XA18", "XA19", "XA20", "XB17", "XB18", "XB19", "XB20", "XC17", "XC18", "XC19", "XC20", "XY6", "XY21", "XY22" ]
+
+## mannans = [ "MA25", "MB25", "MC25", "MA26", "MB26", "MC26", "MA27", "MB27", "MC27", "MA28", "MB28", "MC28", "MA29", "MB29", "MC29", "MA30", "MB30", "MC30", "AN1", "AN2", "AN3", "AN4", "AN5", "AN6", "AN7", "AN8", "AN9", "AN10", "AN11", "AN12", "AN13", "AN14", "AN15", "AN16", "AN31", "AN32", "AN17", "AN18", "AN19", "AN20", "AN21", "AN22", "AN23", "AN24", "AN33" ]
+## mannans = [ "AN16", "AN31", "AN32", "MA25", "MB25", "MC25", "MA26", "MB26", "MC26", "MA27", "MB27", "MC27", "MA28", "MB28", "MC28", "AN33", "MA29", "MB29", "MC29", "MA30", "MB30", "MC30" ]
 
 ## XYLAN
 # XY1 XY2 XY3 XY4 XY5 XY6 XY7 XY8 XY9 XY10 XY11 XY12 XY13 XY14 XY15 XY16 XY21 XY22 XA17 XB17 XC17 XA18 XB18 XC18 XA19 XB19 XC19 XA20 XB20 XC20
@@ -264,6 +269,20 @@ end
 ## MANNAN
 # AN1 AN2 AN3 AN4 AN5 AN6 AN7 AN8 AN9 AN10 AN11 AN12 AN13 AN14 AN15 AN16 AN17 AN18 AN19 AN20 AN21 AN22 AN23 AN24 AN31 AN32 AN33 MA25 MB25 MC25 MA26 MB26 MC26 MA27 MB27 MC27 MA28 MB28 MC28 MA29 MB29 MC29 MA30 MB30 MC30
 
+function mapwater(
+    pdbname::String, trjname::String;
+    first=1, step=1, last=nothing,
+    selection="not water", water_selection="water",
+    without_hydrogens=true, cutoff=5.0
+)
+    simulation = MolSimToolkit.Simulation(pdbname, trjname, first=first, step=step, last=last)
+    return mapwater(
+        simulation,
+        selection = selection, water_selection = water_selection,
+        without_hydrogens = without_hydrogens,
+        cutoff = cutoff
+    )
+end
 
 function mapwater(
     simulation::MolSimToolkit.Simulation;
@@ -296,39 +315,82 @@ function mapwater(
            M[iwater, iframe] = md.within_cutoff
         end
     end
-    return M
+    return BitMatrix(M)
 end
 
-function t_residence(M::Matrix{Bool}; timestep=0.1)
-    t = Float64[]
-    for i in 1:size(M, 1)
-        append!(
-            t,
-            timestep * checking_residence(M[i, :])
-        )
+function mapwater(M1::BitMatrix, M2::BitMatrix, operation::Int64)
+    M = M1 + M2
+    if operation in Set([0,1,2])
+        return ifelse.(M .== operation, true, false)
+    else
+        throw(ArgumentError("The operation must be 0 (complement), 1 (disjoint), or 2 (intersection)."))
     end
-    return t[findall(it -> !iszero(it), t)]
 end
 
-function checking_residence(frames::Vector{Bool})
-    if iszero(sum(frames))
+function t_residence(M::BitMatrix; timestep=0.1)
+    t = Float64[]
+    sizehint!(t, size(M,1) * 10)
+    for row in eachrow(M)
+        trow = checking_residence(
+            BitVector(row)
+        )
+        append!(t, timestep .* trow)
+    end
+    return filter(!iszero, t)
+end
+
+function checking_residence(checklist::BitVector)
+    if iszero(sum(checklist))
         return 0
     end
-    step = Int64[]
-    notfound, counter = findall(frame -> !frame, frames), 0
-    for iframe in 1:length(frames)
-        if !in(iframe, Set(notfound))
+    counting = Int64[]
+    counter = 0
+    for present in checklist
+        if present
             counter += 1
         else
-            push!(step, counter)
-            counter = 0
-        end
-        if iframe == length(frames)
-            push!(step, counter)
+            if counter > 0
+                push!(counting, counter)
+                counter = 0
+            end
         end
     end
-    return step
+    if counter > 0
+        push!(counting, counter)
+    end
+    return counting
 end
+
+# function t_residence(M::BitMatrix; timestep=0.1)
+#     t = Float64[]
+#     for i in 1:size(M,1)
+#         append!(
+#             t,
+#             timestep * checking_residence(M[i,:])
+#         )
+#     end
+#     return t[findall(it -> !iszero(it), t)]
+# end
+
+# function checking_residence(checklist::BitVector)
+#     if iszero(sum(checklist))
+#         return 0
+#     end
+#     counting, counter = Int64[], 0
+#     itsnot = findall(frame -> !frame, checklist)
+#     for iframe in 1:length(checklist)
+#         if !in(iframe, Set(itsnot))
+#             counter += 1
+#         else
+#             push!(counting, counter)
+#             counter = 0
+#         end
+#         if (iframe == length(checklist)) && (counter != 0)
+#             push!(counting, counter)
+#         end
+#     end
+#     return counting
+# end
 
 # function mapwater(
 #     simulation::MolSimToolkit.Simulation;

@@ -91,3 +91,45 @@ function mindist(pdbfile::String, trajectory::String, segment::String; ffirst=1,
     end; println(""); println(" ~~ Done!"); return nothing
 
 end
+
+function closest2fibril(
+    pdbname::String, trjname::String, segcode::String; first=1, last=nothing, step=1,
+    selection="resname BGLC", without_hydrogens=true, cutoff=5.0
+)   
+    simulation = MolSimToolkit.Simulation(pdbname, trjname, first=first, step=step, last=last)
+    return closest2fibril(
+        simulation,
+        segcode,
+        selection = selection,
+        without_hydrogens = without_hydrogens,
+        cutoff = cutoff
+    )
+    
+end
+
+function closest2fibril(simulation::MolSimToolkit.Simulation, segcode::String; selection="resname BGLC", without_hydrogens=true, cutoff=5.0)
+    reference = PDBTools.select(simulation.atoms, selection) 
+    monitored = PDBTools.select(simulation.atoms, at -> at.segname == segcode)
+    if without_hydrogens
+        reference = PDBTools.select(reference, at -> PDBTools.element(at) != "H")
+        monitored = PDBTools.select(monitored, at -> PDBTools.element(at) != "H")
+    end
+    imonitored, jreference = PDBTools.index.(monitored), PDBTools.index.(reference)
+    monitored_resnums = PDBTools.resnum.(monitored)
+    molindexes(iatom) = findfirst(x -> x == monitored_resnums[iatom], unique(monitored_resnums))
+    iresid, distances = Vector{Vector{Int64}}(undef, length(simulation)), Vector{Vector{Float64}}(undef, length(simulation))
+    for (iframe, frame) in enumerate(simulation)
+        xyz, uc = MolSimToolkit.positions(frame), diag(MolSimToolkit.unitcell(frame))
+        crosspairs = MolSimToolkit.CrossPairs(
+            xpositions = [ SVector(xyz[i]) for i in imonitored ], # solvent - the monitored atoms around the reference (e.g. xylan and mannans)
+            ypositions = [ SVector(xyz[j]) for j in jreference ], # solute  - the reference atoms (e.g. cellulsoe microfibril)
+            xmol_indices = molindexes,
+            cutoff = cutoff,
+            unitcell = uc
+        )
+        mindistances = MolSimToolkit.minimum_distances!(crosspairs)
+        iresid[iframe] = [ monitored_resnums[md.i] for md in mindistances ]
+        distances[iframe] = [ md.d for md in mindistances ]
+    end
+    return iresid, distances
+end

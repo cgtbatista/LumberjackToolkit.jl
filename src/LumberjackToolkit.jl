@@ -18,10 +18,10 @@ import Base.Threads: @threads
 export rmsd_plot
 
 ## Density profiles
-export densityprofile
-export ρ, δ
-export averaging_profile, average_bins, binning, _ordering_symmetry, _correct_center, _correct_symmetry, _get_reference
-export vmd_get_charges
+#export densityprofile
+#export ρ, δ
+#export averaging_profile, average_bins, binning, _ordering_symmetry, _correct_center, _correct_symmetry, _get_reference
+#export vmd_get_charges
 
 export avg_densityprofile
 
@@ -54,7 +54,7 @@ export testfiles, coef_diffusion, msd, frame_coordinates, molindexes, writecoord
 export readcoords2, msd2, unwrap, dimcells, displace, originaldisplace
 export teste2, diameter_analysis, fibrilradii, chain_centers
 
-export mapwater, checking_residence, t_residence
+export mapwater, checking_residence, t_residence, closest2fibril
 
 ## dupree
 export cellulose_surface, filterSTL, fibrilwidth, fibril_surface, fibril_slice
@@ -62,7 +62,7 @@ export chargesPSF, binning, binspecs
 
 # Getting some properties profiles using the density distribution (e.g. electron density profile of POPC on the box)
 include("./residence_time.jl")
-include("./density.jl")
+#include("./density.jl")
 include("./dihedrals.jl")
 
 include("./plotting.jl")
@@ -85,5 +85,6 @@ include("./simulation.jl")
 include("./unwrap.jl")
 
 include("./dupree.jl")
+include("./closest2fibril.jl")
 
 end
