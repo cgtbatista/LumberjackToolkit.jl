@@ -280,6 +280,7 @@ end
 
 ### align_frames(psf, dcd, selection="not water")
 ### edp()
+
 function plot_average_edp(nbins::Vector{Vector{Float64}}, densities::Vector{Vector{Float64}})
     avg = deepcopy(nbins[1])
     for i in 2:length(nbins)
@@ -287,7 +288,7 @@ function plot_average_edp(nbins::Vector{Vector{Float64}}, densities::Vector{Vect
     end
     return avg ./ length(nbins)
 end
-#at -> PDBTools.element(at) != "H"
+
 function edp(
     pdbname::String, trjname::String; first=1, last=nothing, step=1,
     psfname=nothing, selection="not water", isdimensionless=true,
@@ -318,59 +319,113 @@ function edp(
                 axis=axis, cutoff=cutoff, σ=σ, hascenter=hascenter, hassymmetry=hassymmetry
             )
         end
+    elseif length(axis) == 2
+        if isdimensionless
+            return edp_2d_dimensionless(
+                sim, e,
+                axis=axis, cutoff=cutoff, hascenter=hascenter, hassymmetry=hassymmetry
+            )
+        else
+            return edp_2d_gaussian(
+                sim, e,
+                axis=axis, cutoff=cutoff, σ=σ, hascenter=hascenter, hassymmetry=hassymmetry
+            )
+        end
     else
         throw(ArgumentError("The axis should be a string with one or two characters."))
     end
 end
 
 function edp_1d_dimensionless(
-    sim::MolSimToolkit.Simulation, e::Vector{Float64};
+    sim::MolSimToolkit.Simulation, electrons::Vector{Float64};
     axis="z", cutoff=1.0, hascenter=true, hassymmetry=true
 )
     axescode = Dict{String, Int64}("x" => 1, "y" => 2, "z" => 3)
     if haskey(axescode, lowercase(axis))
         dim = axescode[axis]
-        V, bins = binning(sim, axis=axis, cutoff=cutoff)
-        density = Vector{Float64}(undef, length(bins)-1)
+        V, bin = binning(sim, axis=axis, cutoff=cutoff)
+        bins = Matrix{Float64}(undef, length(bin)-1, length(sim))
+        densities = deepcopy(bins)
     else
         throw(ArgumentError("The axis should be associated with the labels of cartesian axes."))
     end
-    iatoms = PDBTools.index.(sim.atoms)    
-    electrons = e[iatoms]
-    densities = Vector{Vector{Float64}}(undef, length(sim))
-    byframes = deepcopy(densities)
+    iatoms = PDBTools.index.(sim.atoms)
     for (iframe, frame) in enumerate(sim)
         coords = [ coord[dim] for coord in MolSimToolkit.positions(frame)[iatoms] ]
-        ibin = 1
-        while ibin < length(bins)
-            idx = findall(
-                coord -> bins[ibin] <= coord <= bins[ibin+1],
-                coords
-            )
-            density[ibin] = !isempty(idx) ? V \ sum(electrons[idx]) : 0.0
-            ibin += 1
+        for i in 1:length(bin)-1
+            idx = findall(coord -> bin[i] <= coord <= bin[i+1], coords)
+            densities[i, iframe] = !isempty(idx) ? V \ sum(electrons[iatoms][idx]) : 0.0
         end
-        densities[iframe] = deepcopy(density)
         if !hascenter
-            byframes[iframe] = avgbins(bins)
+            bins[:,iframe] = avgbins(bin)
         else
             avg = mean(coords)
             if hassymmetry
-                byframes[iframe] = _fix_binning_symmetry(bins, avg)
-                if !issorted(byframes[iframe])
-                    isorted = sortperm(byframes[iframe])
-                    byframes[iframe], densities[iframe] = byframes[iframe][isorted], densities[iframe][isorted]
+                bins[:,iframe] = _fix_binning_symmetry(bin, avg)
+                if !issorted(bins[:,iframe])
+                    isorted = sortperm(bins[:,iframe])
+                    bins[:,iframe], densities[:,iframe] = bins[isorted,iframe], densities[isorted,iframe]
                 end
             else
-                byframes[iframe] = _fix_binning_center(bins, avg)
+                bins[:,iframe] = _fix_binning_center(bin, avg)
             end
         end
     end
-    return byframes, densities
+    return bins, densities
+end
+
+function edp_2d_dimensionless(
+    sim::MolSimToolkit.Simulation, electrons::Vector{Float64};
+    axis="xz", cutoff=1.0, hascenter=true, hassymmetry=true
+)
+    axescode = Dict{String, Function}([
+        ["xy", "yx"] .=> () -> [1,2]; ["xz", "zx"] .=> () -> [1,3]; ["yz", "zy"] .=> () -> [2,3]
+    ])
+    if haskey(axescode, lowercase(axis))
+        dims = axescode[axis]()
+        V, bin1, bin2 = binning(sim, axis=axis, cutoff=cutoff)
+        bins1 = Matrix{Float64}(undef, length(bin1)-1, length(sim))
+        bins2 = Matrix{Float64}(undef, length(bin2)-1, length(sim))
+        densities = Array{Float64, 3}(undef, length(bin1)-1, length(bin2)-1, length(sim))
+        #density = Matrix{Float64}(undef, length(bin1)-1, length(bin2)-1)
+    else
+        throw(ArgumentError("The axis should be associated with the labels of cartesian axes."))
+    end
+    iatoms = PDBTools.index.(sim.atoms)
+    #densities = Vector{Matrix{Float64}}(undef, length(sim))
+    for (iframe, frame) in enumerate(sim)
+        coords = [ coord[dims] for coord in MolSimToolkit.positions(frame)[iatoms] ]
+        for i in 1:length(bin1)-1, j in 1:length(bin2)-1
+            idx = findall(
+                coord -> (bin1[i] <= coord[1] <= bin1[i+1]) && (bin2[j] <= coord[2] <= bin2[j+1]),
+                coords
+            )
+            densities[i,j,iframe] = !isempty(idx) ? V \ sum(electrons[iatoms][idx]) : 0.0
+        end
+        #densities[iframe] = deepcopy(density)
+        if !hascenter
+            bins1[:,iframe], bins2[:,iframe] = avgbins(bin1), avgbins(bin2)
+        else
+            avg = mean(coords)
+            if hassymmetry
+                bins1[:,iframe] = _fix_binning_symmetry(bin1, avg[1])
+                bins2[:,iframe] = _fix_binning_symmetry(bin2, avg[2])
+                if !issorted(bins1[:,iframe]) || !issorted(bins2[:,iframe])
+                    isorted, jsorted = sortperm(bins1[:,iframe]), sortperm(bins2[:,iframe])
+                    bins1[:,iframe], bins2[:,iframe] = bins1[isorted,iframe], bins2[jsorted,iframe]
+                    densities[:,:,iframe] = densities[isorted,jsorted,iframe]
+                end
+            else
+                bins1[:,iframe] = _fix_binning_center(bin1, avg[1])
+                bins2[:,iframe] = _fix_binning_center(bin2, avg[2])
+            end
+        end
+    end
+    return bins1, bins2, densities
 end
 
 ## sqrt((3V/4π)/m)
-function egrid(coords, resolution::Float64)
+function density_grid(coords::Vector{SVector{3, Float64}}, resolution::Float64)
     xlower, xupper = extrema([ coord[1] for coord in coords ])
     ylower, yupper = extrema([ coord[2] for coord in coords ])
     zlower, zupper = extrema([ coord[3] for coord in coords ])
@@ -381,90 +436,123 @@ function egrid(coords, resolution::Float64)
     return points
 end
 
+function density_grid(coords::MolSimToolkit.FramePositions, resolution::Float64)
+    coords = [ SVector(coord) for coord in coords ]
+    return density_grid(coords, resolution) 
+end
+
 function edp_1d_gaussian(
-    sim::MolSimToolkit.Simulation, e::Vector{Float64};
+    sim::MolSimToolkit.Simulation, electrons::Vector{Float64};
     axis="z", cutoff=1.0, σ=1.0, hascenter=true, hassymmetry=true
 )
     axescode = Dict{String, Int64}("x" => 1, "y" => 2, "z" => 3)
     if haskey(axescode, lowercase(axis))
         dim = axescode[axis]
-        V, bins = binning(sim, axis=axis, cutoff=cutoff)
-        density = Vector{Float64}(undef, length(bins)-1)
+        V, bin = binning(sim, axis=axis, cutoff=cutoff)
+        bins = Matrix{Float64}(undef, length(bin)-1, length(sim))
+        densities = deepcopy(bins)
     else
         throw(ArgumentError("The axis should be associated with the labels of cartesian axes."))
     end
-    iatoms = PDBTools.index.(sim.atoms)    
-    electrons = e[iatoms]
-    densities = Vector{Vector{Float64}}(undef, length(sim))
-    byframes = deepcopy(densities)
+    iatoms = PDBTools.index.(sim.atoms)
     for (iframe, frame) in enumerate(sim)
         coords = MolSimToolkit.positions(frame)[iatoms]
         σ = σ .* ones(Float64, length(iatoms))
-        A = electrons ./ (sqrt(2π) .* σ).^3
+        A = electrons[iatoms] ./ (sqrt(2π) .* σ).^3
         α = inv.(-2σ.^2)
         ρ(r) = sum(
             A .* exp.(α .* [ sum((r .- coord).^2) for coord in coords ])
         )
-        points = egrid(coords, cutoff)
-        ρbins = ρ.(points)
-        ibin = 1
-        while ibin < length(bins)
+        points = density_grid(coords, cutoff)
+        density = ρ.(points)
+        for i in 1:length(bin)-1
             idx = findall(
-                coord -> bins[ibin] <= coord[dim] <= bins[ibin+1],
+                coord -> bin[i] <= coord[dim] <= bin[i+1],
                 points
             )
-            density[ibin] = !isempty(idx) ? V \ sum(abs.(ρbins[idx])) : 0.0
-            ibin += 1
+            densities[i,iframe] = !isempty(idx) ? V \ sum(density[idx]) : 0.0
         end
-        densities[iframe] = deepcopy(density)
         if !hascenter
-            byframes[iframe] = avgbins(bins)
+            bins[:,iframe] = avgbins(bin)
         else
             avg = mean([ coord[dim] for coord in coords ])
             if hassymmetry
-                byframes[iframe] = _fix_binning_symmetry(bins, avg)
-                if !issorted(byframes[iframe])
-                    isorted = sortperm(byframes[iframe])
-                    byframes[iframe], densities[iframe] = byframes[iframe][isorted], densities[iframe][isorted]
+                bins[:,iframe] = _fix_binning_symmetry(bin, avg)
+                if !issorted(bins[:,iframe])
+                    isorted = sortperm(bins[:,iframe])
+                    bins[:,iframe], densities[:,iframe] = bins[isorted,iframe], densities[isorted,iframe]
                 end
             else
-                byframes[iframe] = _fix_binning_center(bins, avg)
+                bins[:,iframe] = _fix_binning_center(bin, avg)
             end
         end
     end
-    return byframes, densities
+    return bins, densities
 end
 
-# for (iframe, frame) in enumerate(sim)
-#     coords = MolSimToolkit.positions(frame)[iatoms]
-#     if isdimensionless 
-#         ibin = 1
-#         while ibin < length(bins)
-#             idx = findall(coord -> bins[ibin] <= coord[dim] <= bins[ibin+1], coords)
-#             ρtemp[ibin] = ρ(electrons[idx], V) : ρ(coords[idx], electrons[idx], V, resolution=resolution)
-#             ibin += 1
-#         end
-#     end
-#     densities[iframe] = deepcopy(ρtemp)
-#     if !hascenter
-#         byframes[iframe] = avgbins(bins)
-#     else
-#         avg = mean(coords[iatoms])
-#         if hassymmetry
-#             byframes[iframe] = _fix_binning_symmetry(bins, avg)
-#             if !issorted(byframes[iframe])
-#                 isorted = sortperm(byframes[iframe])
-#                 byframes[iframe], densities[iframe] = byframes[iframe][isorted], densities[iframe][isorted]
-#             end
-#         else
-#             byframes[iframe] = _fix_binning_center(bins, avg)
-#         end
-#     end
-# end
-# return byframes, densities
-
-function ρ(q::Vector{Float64}, N::Float64)
-    return N \ sum(abs.(q))
+function edp_2d_gaussian(
+    sim::MolSimToolkit.Simulation, electrons::Vector{Float64};
+    axis="xz", cutoff=1.0, σ=1.0, hascenter=true, hassymmetry=true
+)
+    axescode = Dict{String, Function}([
+        ["xy", "yx"] .=> () -> [1,2]; ["xz", "zx"] .=> () -> [1,3]; ["yz", "zy"] .=> () -> [2,3]
+    ])
+    if haskey(axescode, lowercase(axis))
+        dims = axescode[axis]()
+        V, bin1, bin2 = binning(sim, axis=axis, cutoff=cutoff)
+        bins1 = Matrix{Float64}(undef, length(bin1)-1, length(sim))
+        bins2 = Matrix{Float64}(undef, length(bin2)-1, length(sim))
+        densities = zeros(Float64, length(bin1)-1, length(bin2)-1, length(sim))
+    else
+        throw(ArgumentError("The axis should be associated with the labels of cartesian axes."))
+    end
+    iatoms = PDBTools.index.(sim.atoms)
+    for (iframe, frame) in enumerate(sim)
+        coords = MolSimToolkit.positions(frame)[iatoms]
+        σ = σ .* ones(Float64, length(iatoms))
+        A = electrons[iatoms] ./ (sqrt(2π) .* σ).^3
+        α = inv.(-2σ.^2)
+        ρ(r) = sum(
+            A .* exp.(α .* [ sum((r .- coord).^2) for coord in coords ])
+        )
+        points = density_grid(coords, cutoff)
+        density = ρ.(points)
+        #fill!(densities[:,:,iframe], 0.0)
+        ibin = [ searchsortedfirst(bin1, point[dims[1]]) for point in points ]
+        jbin = [ searchsortedfirst(bin2, point[dims[2]]) for point in points ]
+        @inbounds for p in 1:length(points)
+            i, j = ibin[p], jbin[p]
+            if 1 <= i <= size(densities, 1) && 1 <= j <= size(densities, 2)
+                densities[i, j, iframe] += density[p]
+            end
+        end
+        densities[:,:,iframe] ./= V
+        # for i in 1:length(bin1)-1, j in 1:length(bin2)-1
+        #     idx = findall(
+        #         coord -> (bin1[i] <= coord[1] <= bin1[i+1]) && (bin2[j] <= coord[2] <= bin2[j+1]),
+        #         points
+        #     )
+        #     densities[i,j,iframe] = !isempty(idx) ? V \ sum(density[idx]) : 0.0
+        # end
+        if !hascenter
+            bins1[:,iframe], bins2[:,iframe] = avgbins(bin1), avgbins(bin2)
+        else
+            avg = mean([ coord[dims] for coord in coords ])
+            if hassymmetry
+                bins1[:,iframe] = _fix_binning_symmetry(bin1, avg[1])
+                bins2[:,iframe] = _fix_binning_symmetry(bin2, avg[2])
+                if !issorted(bins1[:,iframe]) || !issorted(bins2[:,iframe])
+                    isorted, jsorted = sortperm(bins1[:,iframe]), sortperm(bins2[:,iframe])
+                    bins1[:,iframe], bins2[:,iframe] = bins1[isorted,iframe], bins2[jsorted,iframe]
+                    densities[:,:,iframe] = densities[isorted,jsorted,iframe]
+                end
+            else
+                bins1[:,iframe] = _fix_binning_center(bin1, avg[1])
+                bins2[:,iframe] = _fix_binning_center(bin2, avg[2])
+            end
+        end
+    end
+    return bins1, bins2, densities
 end
 
 function avgbins(bins::Vector{Float64})
@@ -605,122 +693,41 @@ function align_frames(
     return DebugVMD ? vmdoutput : new_trajectory
 end
 
-# function edp_1d(
-#     sim::MolSimToolkit.Simulation,
-#     q::Vector{Float64};
-#     axis="z", cutoff=1.0, resolution=0.6,
-#     isdimensionless=true, hascenter=true, hassymmetry=true
-# )
-#     densities = Vector{Vector{Float64}}(undef, length(sim))
-#     byframes = Vector{Vector{Float64}}(undef, length(sim))
-#     axesdecode = Dict{String, Vector{Int64}}("x" => [1], "y" => [2], "z" => [3])
-#     dim = if haskey(axesdecode, lowercase(axis))
-#             axescode[axis]
-#         else
-#             throw(ArgumentError("The axis should be associated with the labels of cartesian axes."))
-#     end
-#     hascenter = hassymmetry ? true : hascenter
-#     iatoms = hascenter ? PDBTools.index.(sim.atoms) : nothing
-#     V, bins = binning(sim, axis=axis, cutoff=cutoff)
-#     ρtemp = zeros(Float64, length(bins)-1)
-#     for (iframe, frame) in enumerate(sim)
-#         coords = MolSimToolkit.positions(frame)
-#         ibin = 1
-#         while ibin < length(bins)
-#             idx = findall(coord -> bins[ibin] <= coord[dim] <= bins[ibin+1], coords)
-#             ρtemp[ibin] = isdimensionless ? ρ(q[idx], V) : ρ(coords[idx], q[idx], V, resolution=resolution)
-#             ibin += 1
-#         end
-#         densities[iframe] = deepcopy(ρtemp)
-#         if !hascenter
-#             byframes[iframe] = avgbins(bins)
-#         else
-#             avg = mean(coords[iatoms])
-#             if hassymmetry
-#                 byframes[iframe] = _fix_binning_symmetry(bins, avg)
-#                 if !issorted(byframes[iframe])
-#                     isorted = sortperm(byframes[iframe])
-#                     byframes[iframe], densities[iframe] = byframes[iframe][isorted], densities[iframe][isorted]
-#                 end
-#             else
-#                 byframes[iframe] = _fix_binning_center(bins, avg)
-#             end
-#         end
-#     end
-#     return byframes, densities
-# end
-
-# function binning_reference(
-#     sim::MolSimToolkit.Simulation;
-#     selection="not water", axis="z", Δ=1.0,
-#     hascenter=true, hassymmetry=true
-# )
-#     atoms = PDBTools.select(
-#         MolSimToolkit.atoms(sim), selection
-#     )
-#     idx, axis = PDBTools.index.(atoms), split(lowercase(axis), "")
-#     reference = length(axis) == 1 ? Vector{SVector(1, Float64)}(undef, length(sim)) : Vector{SVector(2, Float64)}(undef, length(sim))
-#     for (iframe, frame) in enumerate(sim)
-#         coords = MolSimToolkit.positions(frame)[idx]
-#         if length(axis) == 1
-#             dict = Dict{String, Vector{Int64}}(
-#                 "x" => [1], "y" => [2], "z" => [3]
-#             )
-#             dim = dict[axis[1]]
-#         elseif length(axis) == 2
-#             dict = Dict{Tuple{String, String}, Vector{Int64}}([
-#                 [("x", "y"), ("y", "x")] .=> [1, 2]; [("x", "z"), ("z", "x")] .=> [1, 3]; [("y", "z"), ("z", "y")] .=> [2, 3]
-#             ])
-#             dim = dict[(axis[1], axis[2])]
-#         end
-#         reference[iframe] = mean(coords[dim])
-#     end
-#     return reference
-# end
-
-# for (iframe, frame) in enumerate(sim)
-#     coords = MolSimToolkit.positions(frame)
-#     xyz = [ xyz[dim] for xyz in coords ]
-#     densities[iframe] = ρbins(bins, xyz, q, N=Vbin)
-#     if isnothing(idx)
-#         byframes[iframe] = avgbins(bins)
-#     else
-#         avg = mean(xyz[idx])
-#         if hassymmetry
-#             byframes[iframe] = _fix_binning_symmetry(bins, avg)
-#             if !issorted(byframes[iframe])
-#                 isorted = sortperm(byframes[iframe])
-#                 byframes[iframe], densities[iframe] = byframes[iframe][isorted], densities[iframe][isorted]
-#             end
-#         else
-#             byframes[iframe] = _fix_binning_center(bins, avg)
-#         end
-#     end
-# end
-
-# function ρbins(bins::Vector{Float64}, coords::Vector{Float64}, q::Vector{Float64}; N=nothing, σ=nothing)
-#     N = isnothing(N) ? length(coords) : N
-#     σ = isnothing(σ) ? ones(length(coords)) : σ
-#     density = zeros(Float64, length(bins))
-#     for (i, bin) in enumerate(bins)
-#         if lastindex(bins) == i
-#             break
-#         end
-#         δ = δbin.(coords, bin, bins[i+1])
-#         electron = eprofile(coords, q, σ)
-#         density[i] = N \ sum(δ .* electron)
-#     end
-#     return density
-# end
-
-# function eprofile(coords::Vector{Float64}, q::Vector{Float64}, σ::Vector{Float64}; isdimensionless=true)
-#     if isdimensionless
-#         return q
-#     end
-#     Ng = inv.(
-#         sqrt.(2π) .* σ
-#     ) ## gaussian normalization
-#     score = (coords .- mean(coords)) ./ σ
-#     return q .* Ng .* exp.(-0.5 .* score.^2)
-# end
-
+function fibrilwidth(
+    bin1::Matrix{Float64},
+    bin2::Matrix{Float64},
+    densities::Array{Float64, 3},
+    step=1.0, tol=0.05
+)
+    d = Float64[]
+    for iframe in 1:size(densities, 3)
+        r_slices, ϕ_slices = densities[:,:,iframe], densities[:,:,iframe]
+        scanning = Dict{Tuple{Float64, Float64}, Float64}()
+        for (ri, ϕi) in zip(r_slices, ϕ_slices)
+            ϕi_norm = mod(ϕi, 360.0)    ## to avoid double counting the same angle (i.e. 0 and 360)
+            ϕf = mod(ϕi_norm + 180.0, 360.0)
+            if haskey(scanning, (ϕi_norm, ϕf)) || haskey(scanning, (ϕf, ϕi_norm))
+                continue
+            end
+            idx = findfirst(ϕ -> ϕ == ϕf, ϕ_slices)
+            if !isnothing(idx)
+                scanning[(ϕi_norm, ϕf)] = ri + r_slices[idx]
+            else
+                idx1, idx2 = if ϕf ≈ 0.0 || ϕf ≈ 360.0
+                        findfirst(ϕ -> ϕ > 0.0, ϕ_slices), findlast(ϕ -> ϕ < 360.0, ϕ_slices)
+                    else
+                        findfirst(ϕ -> ϕ > ϕf, ϕ_slices), findlast(ϕ -> ϕ < ϕf, ϕ_slices)
+                end
+                if !isnothing(idx1) && !isnothing(idx2)
+                    ϕ1, ϕ2 = ϕ_slices[idx1], ϕ_slices[idx2]
+                    r1, r2 = r_slices[idx1], r_slices[idx2]
+                    scanning[(ϕi_norm, ϕf)] = ri + r1 + (r2 - r1) * (ϕf - ϕ1) / (ϕ2 - ϕ1)
+                end
+            end    
+        end
+        if !isempty(scanning)
+            append!(d, values(scanning))
+        end
+    end
+    return d
+end

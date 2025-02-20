@@ -58,7 +58,7 @@ export mapwater, checking_residence, t_residence, closest2fibril
 
 ## dupree
 export cellulose_surface, filterSTL, fibrilwidth, fibril_surface, fibril_slice
-export chargesPSF, binning, binspecs, align_frames, edp, egrid
+export chargesPSF, binning, binspecs, align_frames, edp, density_grid
 
 # Getting some properties profiles using the density distribution (e.g. electron density profile of POPC on the box)
 include("./residence_time.jl")
