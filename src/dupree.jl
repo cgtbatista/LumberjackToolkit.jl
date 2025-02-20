@@ -304,7 +304,7 @@ function edp(
     sim = MolSimToolkit.Simulation(atoms, trjname, first=first, last=last, step=step)
     psfname = isnothing(psfname) ? replace(pdbname, ".pdb" => ".psf") : psfname
     #e = isnothing(e) ? chargesPSF(psfname)[PDBTools.index.(atoms)] : e
-    e = isnothing(e) ? chargesPSF(psfname) : e
+    e = isnothing(e) ? abs.(chargesPSF(psfname)) : e
     hascenter = hassymmetry ? true : hascenter
     if length(axis) == 1
         if isdimensionless
@@ -347,7 +347,7 @@ function edp_1d_dimensionless(
                 coord -> bins[ibin] <= coord <= bins[ibin+1],
                 coords
             )
-            density[ibin] = !isempty(idx) ? V \ sum(abs.(electrons[idx])) : 0.0
+            density[ibin] = !isempty(idx) ? V \ sum(electrons[idx]) : 0.0
             ibin += 1
         end
         densities[iframe] = deepcopy(density)
@@ -369,6 +369,7 @@ function edp_1d_dimensionless(
     return byframes, densities
 end
 
+## sqrt((3V/4π)/m)
 function egrid(coords, resolution::Float64)
     xlower, xupper = extrema([ coord[1] for coord in coords ])
     ylower, yupper = extrema([ coord[2] for coord in coords ])
@@ -378,20 +379,6 @@ function egrid(coords, resolution::Float64)
         push!(points, SVector(x, y, z))
     end
     return points
-end
-
-function ρ(coords, q, N; σ=nothing, resolution=0.6)
-    σ = isnothing(σ) ? σ_edp(length(coords), N) : σ
-    A = q ./ (sqrt(2π) .* σ).^3
-    α = inv(-2σ^2)
-    ρ(r) = sum(A .* exp.(α .* sum((r .- coord).^2 for coord in coords)))
-    return ρ.(grid(coords, resolution))
-end
-
-function σ_edp(m::Float64, V::Float64)
-    return sqrt(
-        (3 * V / 4π) / m
-    )
 end
 
 function edp_1d_gaussian(
@@ -412,8 +399,9 @@ function edp_1d_gaussian(
     byframes = deepcopy(densities)
     for (iframe, frame) in enumerate(sim)
         coords = MolSimToolkit.positions(frame)[iatoms]
-        A = electrons ./ (sqrt(2π) * σ)^3
-        α = inv(-2σ^2)
+        σ = σ .* ones(Float64, length(iatoms))
+        A = electrons ./ (sqrt(2π) .* σ).^3
+        α = inv.(-2σ.^2)
         ρ(r) = sum(
             A .* exp.(α .* [ sum((r .- coord).^2) for coord in coords ])
         )
