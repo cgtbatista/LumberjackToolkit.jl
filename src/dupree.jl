@@ -697,37 +697,74 @@ function fibrilwidth(
     bin1::Matrix{Float64},
     bin2::Matrix{Float64},
     densities::Array{Float64, 3},
-    step=1.0, tol=0.05
-)
-    d = Float64[]
+    step=1.0, tol=0.005
+)   
+    ϕ = collect(0:step:180-step)
+
+    d = Matrix{Float64}(undef, length(ϕ), size(densities, 3))
     for iframe in 1:size(densities, 3)
-        r_slices, ϕ_slices = densities[:,:,iframe], densities[:,:,iframe]
-        scanning = Dict{Tuple{Float64, Float64}, Float64}()
-        for (ri, ϕi) in zip(r_slices, ϕ_slices)
-            ϕi_norm = mod(ϕi, 360.0)    ## to avoid double counting the same angle (i.e. 0 and 360)
-            ϕf = mod(ϕi_norm + 180.0, 360.0)
-            if haskey(scanning, (ϕi_norm, ϕf)) || haskey(scanning, (ϕf, ϕi_norm))
-                continue
+        x_coords = bin1[:, iframe]
+        y_coords = bin2[:, iframe]
+        densities_frame = densities[:, :, iframe]
+        
+        x_min, x_max = extrema(x_coords)
+        y_min, y_max = extrema(y_coords)
+        x_center = (x_min + x_max) / 2
+        y_center = (y_min + y_max) / 2
+        
+        sorted_x_perm = sortperm(x_coords)
+        sorted_x = x_coords[sorted_x_perm]
+        sorted_y_perm = sortperm(y_coords)
+        sorted_y = y_coords[sorted_y_perm]
+        
+        dx = length(sorted_x) > 1 ? minimum(diff(sorted_x)) : Inf
+        dy = length(sorted_y) > 1 ? minimum(diff(sorted_y)) : Inf
+        dr = min(dx, dy) / 10.0
+        dr = isfinite(dr) ? dr : 0.1
+
+        function radii(theta_rad)
+            max_r = 0.0
+            t = 0.0
+            while true
+                x = x_center + t * cos(theta_rad)
+                y = y_center + t * sin(theta_rad)
+                
+                if x < x_min || x > x_max || y < y_min || y > y_max
+                    break
+                end
+                
+                idx_x_sorted = searchsortednearest(sorted_x, x)
+                idx_x = sorted_x_perm[idx_x_sorted]
+                idx_y_sorted = searchsortednearest(sorted_y, y)
+                idx_y = sorted_y_perm[idx_y_sorted]
+                
+                if densities_frame[idx_x, idx_y] < tol
+                    break
+                end
+                
+                max_r = t
+                t += dr
             end
-            idx = findfirst(ϕ -> ϕ == ϕf, ϕ_slices)
-            if !isnothing(idx)
-                scanning[(ϕi_norm, ϕf)] = ri + r_slices[idx]
-            else
-                idx1, idx2 = if ϕf ≈ 0.0 || ϕf ≈ 360.0
-                        findfirst(ϕ -> ϕ > 0.0, ϕ_slices), findlast(ϕ -> ϕ < 360.0, ϕ_slices)
-                    else
-                        findfirst(ϕ -> ϕ > ϕf, ϕ_slices), findlast(ϕ -> ϕ < ϕf, ϕ_slices)
-                end
-                if !isnothing(idx1) && !isnothing(idx2)
-                    ϕ1, ϕ2 = ϕ_slices[idx1], ϕ_slices[idx2]
-                    r1, r2 = r_slices[idx1], r_slices[idx2]
-                    scanning[(ϕi_norm, ϕf)] = ri + r1 + (r2 - r1) * (ϕf - ϕ1) / (ϕ2 - ϕ1)
-                end
-            end    
+            return max_r
         end
-        if !isempty(scanning)
-            append!(d, values(scanning))
+
+        for (i, ϕi) in enumerate(ϕ)
+            ϕi = deg2rad(ϕi)
+            d[i, iframe] = sum(
+                radii.([ϕi, ϕi + π])
+            )
         end
     end
     return d
+end
+
+function searchsortednearest(vector, x)
+    idx = searchsortedfirst(vector, x)
+    if idx == 1
+        return 1
+    elseif idx > length(vector)
+        return length(vector)
+    else
+        return abs(vector[idx] - x) < abs(vector[idx-1] - x) ? idx : idx - 1
+    end
 end
