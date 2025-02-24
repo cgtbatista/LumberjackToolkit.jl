@@ -1,334 +1,392 @@
-"""
-    densityprofile(pdb::String, trajectory::String; ...)
-
-It computes the density profile for each one of the frames inside the trajectory.
-
-# Arguments
-- `pdb::String`: a String with the pdb file path.
-- `trajectory::String`: a String with the trajectory file path.
-- `profile::String`: a String with the profile type. It can be "number", "mass", "charge", or "electron".
-- `selection::String`: a String with the selection of the atoms.
-- `axis::String`: a String with the axis flag.
-- `dimensions::Int`: an integer with the number of dimensions. It can be 1 or 2.
-- `resolution::Float64`: a Float64 with the resolution of the bins.
-- `center::Bool`: a Bool to center the profile.
-- `symmetry::Bool`: a Bool to apply the symmetry protocol.
-- `symmetry_selection::String`: a String with the selection of the atoms to apply the symmetry protocol.
-- `first::Int`: an integer with the first frame to be considered.
-- `step::Int`: an integer with the step to be considered.
-- `last::Int`: an integer with the last frame to be considered.
-- `charge_column::String`: a String with the charge column to be considered.
-- `edp::String`: a String with the electron density profile.
-- `charge_correction::Bool`: a Bool to apply the charge correction.
-- `normalization::Bool`: a Bool to apply the normalization.
-- `echo::Bool`: a Bool to print or not the output.
-"""
-function densityprofile(
-        pdb::String,
-        trajectory::String;
-        profile="electron", selection="all",
-        axis="z", dimensions=1, resolution=1, center=true, symmetry=true, symmetry_selection="not water", first=1, step=1, last=nothing,
-        charge_column=nothing, edp=nothing, charge_correction=true, normalization=true, echo=true
-    )
-    
-    distances, densities = [], []
-
-    ####    output
-    if echo
-        println("$(dimensions)D -- $profile density distribution of the molecules inside the box:")
-        println("   the selection is `$selection`")
-        println("   resolution on $axis is equal to $resolution Å")
-        println("")
+function edp(
+    pdbname::String, trjname::String; first=1, last=nothing, step=1,
+    psfname=nothing, selection="not water", isdimensionless=true,
+    axis="z", cutoff=4.0, resolution=0.6, e=nothing, σ=1.0,
+    hascenter=true, hassymmetry=true
+)
+    if !in(lowercase(axis), Set(["x", "y", "z", "xy", "xz", "yz", "yx", "zx", "zy"]))
+        throw(ArgumentError("""
+        The axis should be associated with the labels of cartesian axes or plane.
+        Please insert it such as: `x`, `y`, `z`, `xy`, `xz`, or `yz`.
+        """))
     end
-    ####
-
-    simulation = MolSimToolkit.Simulation(pdb, trajectory; first=first, last=last, step=step)
-    selected_atoms = PDBTools.select(MolSimToolkit.atoms(simulation), selection)
-    idx = PDBTools.index.(selected_atoms)
-
-    bins, V_norm = binning(simulation, axis=axis, resolution=resolution)
-    if symmetry || center;
-        references = _get_reference(simulation, symmetry_selection)
-        if lowercase(string(axis)) == "x"
-            reference = [ ref[1] for ref in references ]
-        elseif lowercase(string(axis)) == "y"
-            reference = [ ref[2] for ref in references ]
-        elseif lowercase(string(axis)) == "z"
-            reference = [ ref[3] for ref in references ]
+    atoms = PDBTools.select(PDBTools.readPDB(pdbname), selection)
+    sim = MolSimToolkit.Simulation(atoms, trjname, first=first, last=last, step=step)
+    psfname = isnothing(psfname) ? replace(pdbname, ".pdb" => ".psf") : psfname
+    #e = isnothing(e) ? chargesPSF(psfname)[PDBTools.index.(atoms)] : e
+    e = isnothing(e) ? abs.(chargesPSF(psfname)) : e
+    hascenter = hassymmetry ? true : hascenter
+    if length(axis) == 1
+        if isdimensionless
+            return edp_1d_dimensionless(
+                sim, e,
+                axis=axis, cutoff=cutoff, hascenter=hascenter, hassymmetry=hassymmetry
+            )
         else
-            throw(ArgumentError("The axis flag should be coded as `x`, `y`, or `z` strings."))
+            return edp_1d_gaussian(
+                sim, e,
+                axis=axis, cutoff=cutoff, σ=σ, hascenter=hascenter, hassymmetry=hassymmetry
+            )
         end
+    elseif length(axis) == 2
+        if isdimensionless
+            return edp_2d_dimensionless(
+                sim, e,
+                axis=axis, cutoff=cutoff, hascenter=hascenter, hassymmetry=hassymmetry
+            )
+        else
+            return edp_2d_gaussian(
+                sim, e,
+                axis=axis, cutoff=cutoff, σ=σ, hascenter=hascenter, hassymmetry=hassymmetry
+            )
+        end
+    else
+        throw(ArgumentError("The axis should be a string with one or two characters."))
     end
+end
 
-    if profile == "number"
-        property = ones(Float64, length(idx))
-    elseif profile == "mass"
-        property = PDBTools.atomic_mass.(selected_atoms)
-    elseif profile == "charge"
-        if isnothing(charge_column) || charge_column == "beta" || charge_column == "b-factor"
-            property = PDBTools.beta.(selected_atoms)
-        elseif charge_column == "occup" || charge_column == "occupancy"
-            property = PDBTools.occup.(selected_atoms)
+function edp_1d_dimensionless(
+    sim::MolSimToolkit.Simulation, electrons::Vector{Float64};
+    axis="z", cutoff=1.0, hascenter=true, hassymmetry=true
+)
+    axescode = Dict{String, Int64}("x" => 1, "y" => 2, "z" => 3)
+    if haskey(axescode, lowercase(axis))
+        dim = axescode[axis]
+        V, bin = binning(sim, axis=axis, cutoff=cutoff)
+        bins = Matrix{Float64}(undef, length(bin)-1, length(sim))
+        densities = deepcopy(bins)
+    else
+        throw(ArgumentError("The axis should be associated with the labels of cartesian axes."))
+    end
+    iatoms = PDBTools.index.(sim.atoms)
+    for (iframe, frame) in enumerate(sim)
+        coords = [ coord[dim] for coord in MolSimToolkit.positions(frame)[iatoms] ]
+        for i in 1:length(bin)-1
+            idx = findall(coord -> bin[i] <= coord <= bin[i+1], coords)
+            densities[i, iframe] = !isempty(idx) ? V \ sum(electrons[iatoms][idx]) : 0.0
         end
-    elseif profile == "electron"
-        if charge_correction
-            if isnothing(charge_column) || charge_column == "beta" || charge_column == "b-factor"
-                atomic_charges = PDBTools.beta.(selected_atoms)
-            elseif charge_column == "occup" || charge_column == "occupancy"
-                atomic_charges = PDBTools.occup.(selected_atoms)
+        if !hascenter
+            bins[:,iframe] = avgbins(bin)
+        else
+            avg = mean(coords)
+            if hassymmetry
+                bins[:,iframe] = _fix_binning_symmetry(bin, avg)
+                if !issorted(bins[:,iframe])
+                    isorted = sortperm(bins[:,iframe])
+                    bins[:,iframe], densities[:,iframe] = bins[isorted,iframe], densities[isorted,iframe]
+                end
+            else
+                bins[:,iframe] = _fix_binning_center(bin, avg)
             end
-            property = PDBTools.atomic_number.(selected_atoms) .- atomic_charges
-        else
-            property = PDBTools.atomic_number.(selected_atoms)
         end
     end
-
-    for frame in simulation
-        i = simulation.frame_index
-        ####    output
-        if echo; println("    - frame $i"); end
-        ####
-        coords = MolSimToolkit.positions(frame)[idx]
-        new_coords = [ MolSimToolkit.Point3D(coords[n][1], coords[n][2], coords[n][3]) for n in eachindex(coords) ]
-
-        d = ρ(bins, new_coords, V_norm, axis=axis, prop=property)
-
-        if center && !symmetry
-            new_bins = _correct_center(bins, reference[i])
-        elseif symmetry
-            new_bins = _correct_symmetry(bins, reference[i])
-            new_bins, d = _ordering_symmetry(new_bins, d)
-        else
-            new_bins = average_bins(bins)
-        end
-
-        push!(distances, new_bins)
-        push!(densities, d)
-    end
-    
-    ####    output
-    if echo
-        println("")
-        println("The density profile was computed successfully.")
-        println("")
-    end
-    ####
-
-    return convert(Vector{Vector{Float64}}, distances), convert(Vector{Vector{Float64}}, densities)
+    return bins, densities
 end
 
-
-"""
-    averaging_profile(distances::Vector{Vector{Float64}}, densities::Vector{Vector{Float64}})
-
-This function takes the `distances` and `densities` from Vector{Vector{Float64}} to Vector{Float64} by means and standard deviation computations.
-
-# Arguments
-- `distances::Vector{Vector{Float64}}`: a Vector{Vector{Float64}} with the distances from the center of the profile.
-- `densities::Vector{Vector{Float64}}`: a Vector{Vector{Float64}} with the densities of the profile.
-"""
-function averaging_profile(distances::Vector{Vector{Float64}}, densities::Vector{Vector{Float64}})
-
-    avg_distances = Statistics.mean(hcat(distances...), dims=2)[:,1]
-    avg_densities = Statistics.mean(hcat(densities...), dims=2)[:,1]
-    std_densities = Statistics.std(hcat(densities...), dims=2)[:,1]
-
-    return avg_distances, avg_densities, std_densities
-end
-
-
-"""
-    _ordering_symmetry(bins::Vector{Float64}, ρ::Vector{Float64})
-
-This function checks if the bins are ordered after the symmetry protocol and if not, it orders them.
-
-# Arguments
-- `bins::Vector{Float64}`: a Vector{Float64} with the bins.
-- `ρ::Vector{Float64}`: a Vector{Float64} with the densities.
-"""
-function _ordering_symmetry(bins::Vector{Float64}, ρ::Vector{Float64})
-    if issorted(bins)
-        return bins, ρ
+function edp_2d_dimensionless(
+    sim::MolSimToolkit.Simulation, electrons::Vector{Float64};
+    axis="xz", cutoff=1.0, hascenter=true, hassymmetry=true
+)
+    axescode = Dict{String, Function}([
+        ["xy", "yx"] .=> () -> [1,2]; ["xz", "zx"] .=> () -> [1,3]; ["yz", "zy"] .=> () -> [2,3]
+    ])
+    if haskey(axescode, lowercase(axis))
+        dims = axescode[axis]()
+        V, bin1, bin2 = binning(sim, axis=axis, cutoff=cutoff)
+        bins1 = Matrix{Float64}(undef, length(bin1)-1, length(sim))
+        bins2 = Matrix{Float64}(undef, length(bin2)-1, length(sim))
+        densities = Array{Float64, 3}(undef, length(bin1)-1, length(bin2)-1, length(sim))
+        #density = Matrix{Float64}(undef, length(bin1)-1, length(bin2)-1)
     else
-        sorted_idx = sortperm(bins)
-        new_bins, new_ρ = bins[sorted_idx], ρ[sorted_idx]
-        return new_bins, new_ρ
+        throw(ArgumentError("The axis should be associated with the labels of cartesian axes."))
     end
-end
-
-
-"""
-    average_bins(bins::Vector{Float64})
-
-It takes an average vector based on the binned box parameters. So it can be rightly compare with the ρ density with ``length(density) ≡ length(bins) - 1``.
-"""
-function average_bins(bins::Vector{Float64})
-    return [ 0.5*(bins[i]+bins[i+1]) for i in 1:(length(bins)-1) ]
-end
-
-
-"""
-    _get_reference(simulation::MolSimToolkit.Simulation, selection::String)
-
-It aims to get the reference center for each frame along the trajectory.
-
-# Arguments
-- `simulation::MolSimToolkit.Simulation`: a MolSimToolkit.Simulation object.
-- `selection::String`: a selection string to get the reference center. For exemple, "all" or "not water".
-"""
-function _get_reference(simulation::MolSimToolkit.Simulation, selection::String)
-
-    xyz = MolSimToolkit.Point3D[]
-
-    reference_atoms = PDBTools.select(MolSimToolkit.atoms(simulation), selection)
-    idx = PDBTools.index.(reference_atoms)
-
-    for frame in simulation
-        append!(xyz, Statistics.mean(MolSimToolkit.positions(frame)[idx], dims=1))
-    end
-
-    return xyz
-end
-
-
-"""
-    _correct_center(bins::Vector{Float64}, reference::Float64)
-
-It corrects the bin values based on the referenced center. In this way, the center will become zero and all the bins values will be reajusted to apply it.
-Now, every distance is compared with the central value.
-
-# Arguments
-- `bins::Vector{Float64}`: a Vector{Float64} with the bins.
-- `reference::Float64`: a Float64 with the reference center.
-"""
-function _correct_center(bins::Vector{Float64}, reference::Float64)
-    
-    idx = findfirst(x -> x >= reference, bins)
-    center = 0.5*(bins[idx]+bins[idx-1])
-    centered_bins = average_bins(bins) .- center
-
-    return centered_bins
-end
-
-"""
-    _correct_symmetry(bins::Vector{Float64}, reference::Float64)
-
-Do the same thing that `_correct_center(...)`, but it extends the concept to adjust the data in such way that the center will become the center of the box in every frame.
-
-# Arguments
-- `bins::Vector{Float64}`: a Vector{Float64} with the bins.
-- `reference::Float64`: a Float64 with the reference center.
-"""
-function _correct_symmetry(bins::Vector{Float64}, reference::Float64)
-    
-    symmetric_bins = Float64[]
-
-    min_threshold, max_threshold = extrema(bins)
-    resolution = (max_threshold - min_threshold) / (length(bins)-1)
-    ΔL = max_threshold - min_threshold - resolution
-
-    centered_bins = _correct_center(bins, reference)
-   
-    for i in eachindex(centered_bins)
-        if (sign(centered_bins[i]) == -1.) && (abs(centered_bins[i]) / (0.5*ΔL) > 1.)
-            push!(symmetric_bins, centered_bins[i] + ΔL)
-        elseif (sign(centered_bins[i]) == 1.) && (abs(centered_bins[i]) / (0.5*ΔL) > 1.)
-            push!(symmetric_bins, centered_bins[i] - ΔL)
+    iatoms = PDBTools.index.(sim.atoms)
+    #densities = Vector{Matrix{Float64}}(undef, length(sim))
+    for (iframe, frame) in enumerate(sim)
+        coords = [ coord[dims] for coord in MolSimToolkit.positions(frame)[iatoms] ]
+        for i in 1:length(bin1)-1, j in 1:length(bin2)-1
+            idx = findall(
+                coord -> (bin1[i] <= coord[1] <= bin1[i+1]) && (bin2[j] <= coord[2] <= bin2[j+1]),
+                coords
+            )
+            densities[i,j,iframe] = !isempty(idx) ? V \ sum(electrons[iatoms][idx]) : 0.0
+        end
+        #densities[iframe] = deepcopy(density)
+        if !hascenter
+            bins1[:,iframe], bins2[:,iframe] = avgbins(bin1), avgbins(bin2)
         else
-            push!(symmetric_bins, centered_bins[i])
+            avg = mean(coords)
+            if hassymmetry
+                bins1[:,iframe] = _fix_binning_symmetry(bin1, avg[1])
+                bins2[:,iframe] = _fix_binning_symmetry(bin2, avg[2])
+                if !issorted(bins1[:,iframe]) || !issorted(bins2[:,iframe])
+                    isorted, jsorted = sortperm(bins1[:,iframe]), sortperm(bins2[:,iframe])
+                    bins1[:,iframe], bins2[:,iframe] = bins1[isorted,iframe], bins2[jsorted,iframe]
+                    densities[:,:,iframe] = densities[isorted,jsorted,iframe]
+                end
+            else
+                bins1[:,iframe] = _fix_binning_center(bin1, avg[1])
+                bins2[:,iframe] = _fix_binning_center(bin2, avg[2])
+            end
         end
     end
-
-    return symmetric_bins
+    return bins1, bins2, densities
 end
 
+## sqrt((3V/4π)/m)
+function density_grid(coords::Vector{SVector{3, Float64}}, resolution::Float64)
+    xlower, xupper = extrema([ coord[1] for coord in coords ])
+    ylower, yupper = extrema([ coord[2] for coord in coords ])
+    zlower, zupper = extrema([ coord[3] for coord in coords ])
+    points = SVector{3, Float64}[]
+    for x in xlower:resolution:xupper, y in ylower:resolution:yupper, z in zlower:resolution:zupper
+        push!(points, SVector(x, y, z))
+    end
+    return points
+end
 
-"""
-    ρ(bins::Vector{Float64}, positions::Vector{Point3D{Float64}}, N::Float64; axis="z", prop=nothing)
+function density_grid(coords::MolSimToolkit.FramePositions, resolution::Float64)
+    coords = [ SVector(coord) for coord in coords ]
+    return density_grid(coords, resolution) 
+end
 
-Computes the density for each bin interval given the frame positions. Here, we apply a normalization base on the bin dimensions, so all the frames will have the same `sum(ρ)`.
-The `prop` argument is used to compute the density of a specific property, like the atomic number, mass, or charge.
-
-# Arguments
-- `bins::Vector{Float64}`: a Vector{Float64} with the bin intervals.
-- `positions::Vector{Point3D{Float64}}`: a Vector{Point3D{Float64}} with the atomic positions.
-- `N::Float64`: a Float64 with the normalization factor.
-- `axis::String`: a String with the axis flag.
-- `prop::Vector{Float64}`: a Vector{Float64} with the property to be computed.
-"""
-function ρ(bins::Vector{Float64}, positions::Vector{MolSimToolkit.Point3D{Float64}}, N::Float64; axis="z", prop=nothing)
-
-    if lowercase(string(axis)) == "x" || axis == 1
-        coords = [ positions[i][1] for i in eachindex(positions) ]
-    elseif lowercase(string(axis)) == "y" || axis == 2
-        coords = [ positions[i][2] for i in eachindex(positions) ]
-    elseif lowercase(string(axis)) == "z" || axis == 3
-        coords = [ positions[i][3] for i in eachindex(positions) ]
+function edp_1d_gaussian(
+    sim::MolSimToolkit.Simulation, electrons::Vector{Float64};
+    axis="z", cutoff=1.0, σ=1.0, hascenter=true, hassymmetry=true
+)
+    axescode = Dict{String, Int64}("x" => 1, "y" => 2, "z" => 3)
+    if haskey(axescode, lowercase(axis))
+        dim = axescode[axis]
+        V, bin = binning(sim, axis=axis, cutoff=cutoff)
+        bins = Matrix{Float64}(undef, length(bin)-1, length(sim))
+        densities = deepcopy(bins)
     else
-        println("Error: The axis flag must be related to the x, y, and z cartesian axes codification. For example, on axis z, it can be `z`, `Z` or `3`.")
+        throw(ArgumentError("The axis should be associated with the labels of cartesian axes."))
     end
-
-    ρ = Float64[]
-    
-    for b in eachindex(bins)
-        if b == lastindex(bins); break; end
-        coded = δ.(coords, bins[b], bins[b+1])
-        ith_ρ = sum(coded .* prop) / N
-        append!(ρ, ith_ρ)
+    iatoms = PDBTools.index.(sim.atoms)
+    for (iframe, frame) in enumerate(sim)
+        coords = MolSimToolkit.positions(frame)[iatoms]
+        σ = σ .* ones(Float64, length(iatoms))
+        A = electrons[iatoms] ./ (sqrt(2π) .* σ).^3
+        α = inv.(-2σ.^2)
+        ρ(r) = sum(
+            A .* exp.(α .* [ sum((r .- coord).^2) for coord in coords ])
+        )
+        points = density_grid(coords, cutoff)
+        density = ρ.(points)
+        for i in 1:length(bin)-1
+            idx = findall(
+                coord -> bin[i] <= coord[dim] <= bin[i+1],
+                points
+            )
+            densities[i,iframe] = !isempty(idx) ? V \ sum(density[idx]) : 0.0
+        end
+        if !hascenter
+            bins[:,iframe] = avgbins(bin)
+        else
+            avg = mean([ coord[dim] for coord in coords ])
+            if hassymmetry
+                bins[:,iframe] = _fix_binning_symmetry(bin, avg)
+                if !issorted(bins[:,iframe])
+                    isorted = sortperm(bins[:,iframe])
+                    bins[:,iframe], densities[:,iframe] = bins[isorted,iframe], densities[isorted,iframe]
+                end
+            else
+                bins[:,iframe] = _fix_binning_center(bin, avg)
+            end
+        end
     end
-
-    return ρ
+    return bins, densities
 end
 
-"""
-    δ(value::Float64, lower::Float64, upper::Float64)
-
-It is an indicator function that maps the elements inside ``x_lower ≤ x_value ≤ x_upper`` interval.
-"""
-function δ(value::Float64, lower::Float64, upper::Float64)
-    if lower <= value <= upper
-        return 1
+function edp_2d_gaussian(
+    sim::MolSimToolkit.Simulation, electrons::Vector{Float64};
+    axis="xz", cutoff=1.0, σ=1.0, hascenter=true, hassymmetry=true
+)
+    axescode = Dict{String, Function}([
+        ["xy", "yx"] .=> () -> [1,2]; ["xz", "zx"] .=> () -> [1,3]; ["yz", "zy"] .=> () -> [2,3]
+    ])
+    if haskey(axescode, lowercase(axis))
+        dims = axescode[axis]()
+        V, bin1, bin2 = binning(sim, axis=axis, cutoff=cutoff)
+        bins1 = Matrix{Float64}(undef, length(bin1)-1, length(sim))
+        bins2 = Matrix{Float64}(undef, length(bin2)-1, length(sim))
+        densities = zeros(Float64, length(bin1)-1, length(bin2)-1, length(sim))
     else
-        return 0
+        throw(ArgumentError("The axis should be associated with the labels of cartesian axes."))
+    end
+    iatoms = PDBTools.index.(sim.atoms)
+    for (iframe, frame) in enumerate(sim)
+        coords = MolSimToolkit.positions(frame)[iatoms]
+        σ = σ .* ones(Float64, length(iatoms))
+        A = electrons[iatoms] ./ (sqrt(2π) .* σ).^3
+        α = inv.(-2σ.^2)
+        ρ(r) = sum(
+            A .* exp.(α .* [ sum((r .- coord).^2) for coord in coords ])
+        )
+        points = density_grid(coords, cutoff)
+        density = ρ.(points)
+        #fill!(densities[:,:,iframe], 0.0)
+        ibin = [ searchsortedfirst(bin1, point[dims[1]]) for point in points ]
+        jbin = [ searchsortedfirst(bin2, point[dims[2]]) for point in points ]
+        @inbounds for p in 1:length(points)
+            i, j = ibin[p], jbin[p]
+            if 1 <= i <= size(densities, 1) && 1 <= j <= size(densities, 2)
+                densities[i, j, iframe] += density[p]
+            end
+        end
+        densities[:,:,iframe] ./= V
+        # for i in 1:length(bin1)-1, j in 1:length(bin2)-1
+        #     idx = findall(
+        #         coord -> (bin1[i] <= coord[1] <= bin1[i+1]) && (bin2[j] <= coord[2] <= bin2[j+1]),
+        #         points
+        #     )
+        #     densities[i,j,iframe] = !isempty(idx) ? V \ sum(density[idx]) : 0.0
+        # end
+        if !hascenter
+            bins1[:,iframe], bins2[:,iframe] = avgbins(bin1), avgbins(bin2)
+        else
+            avg = mean([ coord[dims] for coord in coords ])
+            if hassymmetry
+                bins1[:,iframe] = _fix_binning_symmetry(bin1, avg[1])
+                bins2[:,iframe] = _fix_binning_symmetry(bin2, avg[2])
+                if !issorted(bins1[:,iframe]) || !issorted(bins2[:,iframe])
+                    isorted, jsorted = sortperm(bins1[:,iframe]), sortperm(bins2[:,iframe])
+                    bins1[:,iframe], bins2[:,iframe] = bins1[isorted,iframe], bins2[jsorted,iframe]
+                    densities[:,:,iframe] = densities[isorted,jsorted,iframe]
+                end
+            else
+                bins1[:,iframe] = _fix_binning_center(bin1, avg[1])
+                bins2[:,iframe] = _fix_binning_center(bin2, avg[2])
+            end
+        end
+    end
+    return bins1, bins2, densities
+end
+
+function avgbins(bins::Vector{Float64})
+    return 0.5 .* (bins[1:end-1] + bins[2:end])
+end
+
+function _fix_binning_center(bins::Vector{Float64}, center::Float64)
+    return avgbins(bins .- center)
+end
+
+function _fix_binning_symmetry(bins::Vector{Float64}, center::Float64)
+    lower, upper = extrema(bins)
+    ΔL = upper - lower
+    avgbins = _fix_binning_center(bins, center)
+    return mod.(avgbins .+ 0.5*ΔL, ΔL) .- 0.5*ΔL
+end
+
+function binning(avgbins::Vector{Float64})
+    bins = Vector{Float64}(undef, length(avgbins)+1)
+    Δbin = avgbins[2] - avgbins[1]
+    for (i, bin) in enumerate(avgbins)
+        bins[i] = bin - 0.5*Δbin
+    end
+    bins[end] = avgbins[end] + 0.5*Δbin
+    return bins
+end
+
+function binning(sim::MolSimToolkit.Simulation; axis="z", cutoff=1.0)
+    lower, upper = zeros(3), zeros(3)
+    for frame in sim
+        xyz = MolSimToolkit.positions(frame)
+        if sim.frame_index == 1
+            lower[1], upper[1] = extrema([ ijk[1] for ijk in xyz ])
+            lower[2], upper[2] = extrema([ ijk[2] for ijk in xyz ])
+            lower[3], upper[3] = extrema([ ijk[3] for ijk in xyz ])
+        else
+            lower[1], upper[1] = min(lower[1], minimum([ ijk[1] for ijk in xyz ])), max(upper[1], maximum([ ijk[1] for ijk in xyz ]))
+            lower[2], upper[2] = min(lower[2], minimum([ ijk[2] for ijk in xyz ])), max(upper[2], maximum([ ijk[2] for ijk in xyz ]))
+            lower[3], upper[3] = min(lower[3], minimum([ ijk[3] for ijk in xyz ])), max(upper[3], maximum([ ijk[3] for ijk in xyz ]))
+        end
+    end
+    return binspecs(axis, lower=lower, upper=upper, cutoff=cutoff)
+end
+
+function binspecs(axis::String; lower=zeros(3), upper=ones(3), cutoff=1.0)
+    axis = split(lowercase(axis), "")
+    if length(axis) == 1
+        dict = Dict{String, Function}(
+            "x" => () -> (cutoff*(upper[2]-lower[2])*(upper[3]-lower[3]), collect(lower[1]:cutoff:upper[1])),
+            "y" => () -> (cutoff*(upper[1]-lower[1])*(upper[3]-lower[3]), collect(lower[2]:cutoff:upper[2])),
+            "z" => () -> (cutoff*(upper[1]-lower[1])*(upper[2]-lower[2]), collect(lower[3]:cutoff:upper[3]))
+        )
+        return dict[axis[1]]()
+    elseif length(axis) == 2
+        dict = Dict{Tuple{String, String}, Function}([
+            [("x", "y"), ("y", "x")] .=> () -> (cutoff*(upper[3]-lower[3]), collect(lower[1]:cutoff:upper[1]), collect(lower[2]:cutoff:upper[2]));
+            [("x", "z"), ("z", "x")] .=> () -> (cutoff*(upper[2]-lower[2]), collect(lower[1]:cutoff:upper[1]), collect(lower[3]:cutoff:upper[3]));
+            [("y", "z"), ("z", "y")] .=> () -> (cutoff*(upper[1]-lower[1]), collect(lower[2]:cutoff:upper[2]), collect(lower[3]:cutoff:upper[3]))
+        ])
+        return dict[(axis[1], axis[2])]()
     end
 end
 
-"""
-    binning(simulation::MolSimToolkit.Simulation; axis="z", resolution=1.)
 
-It reports the bins and normalization factor for the loaded simulation box.
+function fibrilwidth(
+    bin1::Matrix{Float64},
+    bin2::Matrix{Float64},
+    densities::Array{Float64, 3},
+    step=1.0, tol=0.005
+)   
+    ϕ = collect(0:step:180-step)
 
-# Arguments
-- `simulation::MolSimToolkit.Simulation`: a MolSimToolkit.Simulation object.
-- `axis::String`: a String with the axis flag.
-- `dimensions::Int`: an integer with the number of dimensions. It can be 1 or 2.
-- `resolution::Float64`: a Float64 with the resolution of the bins.
-"""
-function binning(simulation::MolSimToolkit.Simulation; axis="z", dimensions=1, resolution=1.)
-    
-    xmin, xmax = [ 0., 0., 0. ] , [ 0., 0., 0. ]
+    d = Matrix{Float64}(undef, length(ϕ), size(densities, 3))
+    for iframe in 1:size(densities, 3)
+        x_coords = bin1[:, iframe]
+        y_coords = bin2[:, iframe]
+        densities_frame = densities[:, :, iframe]
+        
+        x_min, x_max = extrema(x_coords)
+        y_min, y_max = extrema(y_coords)
+        x_center = (x_min + x_max) / 2
+        y_center = (y_min + y_max) / 2
+        
+        sorted_x_perm = sortperm(x_coords)
+        sorted_x = x_coords[sorted_x_perm]
+        sorted_y_perm = sortperm(y_coords)
+        sorted_y = y_coords[sorted_y_perm]
+        
+        dx = length(sorted_x) > 1 ? minimum(diff(sorted_x)) : Inf
+        dy = length(sorted_y) > 1 ? minimum(diff(sorted_y)) : Inf
+        dr = min(dx, dy) / 10.0
+        dr = isfinite(dr) ? dr : 0.1
 
-    for frame in simulation
-        atomic_coordinates = MolSimToolkit.positions(frame)
-        x = [ atom[1] for atom in atomic_coordinates ]; y = [ atom[2] for atom in atomic_coordinates ]; z = [ atom[3] for atom in atomic_coordinates ];
-        xmin[1], xmax[1] = ifelse(minimum(x) < xmin[1], minimum(x), xmin[1]), ifelse(maximum(x) > xmax[1], maximum(x), xmax[1])
-        xmin[2], xmax[2] = ifelse(minimum(y) < xmin[2], minimum(y), xmin[2]), ifelse(maximum(y) > xmax[2], maximum(y), xmax[2])
-        xmin[3], xmax[3] = ifelse(minimum(z) < xmin[3], minimum(z), xmin[3]), ifelse(maximum(z) > xmax[3], maximum(z), xmax[3])
+        function radii(theta_rad)
+            max_r = 0.0
+            t = 0.0
+            while true
+                x = x_center + t * cos(theta_rad)
+                y = y_center + t * sin(theta_rad)
+                
+                if x < x_min || x > x_max || y < y_min || y > y_max
+                    break
+                end
+                
+                idx_x_sorted = searchsortednearest(sorted_x, x)
+                idx_x = sorted_x_perm[idx_x_sorted]
+                idx_y_sorted = searchsortednearest(sorted_y, y)
+                idx_y = sorted_y_perm[idx_y_sorted]
+                
+                if densities_frame[idx_x, idx_y] < tol
+                    break
+                end
+                
+                max_r = t
+                t += dr
+            end
+            return max_r
+        end
+
+        for (i, ϕi) in enumerate(ϕ)
+            ϕi = deg2rad(ϕi)
+            d[i, iframe] = sum(
+                radii.([ϕi, ϕi + π])
+            )
+        end
     end
-
-    if lowercase(string(axis)) == "x" || axis == 1
-        i_min = xmin[1]; i_max = xmax[1];
-        L1 = xmax[2]-xmin[2]; L2 = xmax[3]-xmin[3];
-    elseif lowercase(string(axis)) == "y" || axis == 2
-        i_min = xmin[2]; i_max = xmax[2];
-        L1 = xmax[1]-xmin[1]; L2 = xmax[3]-xmin[3];
-    elseif lowercase(string(axis)) == "z" || axis == 3
-        i_min = xmin[3]; i_max = xmax[3];
-        L1 = xmax[1]-xmin[1]; L2 = xmax[2]-xmin[2];
-    else
-        println("Error: The axis flag must be related to the x, y, and z cartesian axes codification. For example, on axis z, it can be `z`, `Z` or `3`.")
-    end
-
-    return collect(i_min:resolution:i_max), Float64(resolution*L1*L2)
+    return d
 end
-

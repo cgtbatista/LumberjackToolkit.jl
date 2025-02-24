@@ -1,26 +1,17 @@
 function namd_pbc(xscname::String)
-
     xscfile = split(Base.read(xscname, String), "\n")
-
-    pbc_string = ""
-
     for line in xscfile
-        
         if !occursin("#", line) && line != ""
-            
-            l = split(line)
-            
+            l = split(line)         
             x = [ parse(Float64, l[2]), parse(Float64, l[3]), parse(Float64, l[4]) ]
             y = [ parse(Float64, l[5]), parse(Float64, l[6]), parse(Float64, l[7]) ]
             z = [ parse(Float64, l[8]), parse(Float64, l[9]), parse(Float64, l[10]) ]
-            a, b, c = acosd( dot(x, y) / (norm(x) * norm(y)) ), acosd( dot(x, z) / (norm(x) * norm(z)) ), acosd( dot(y, z) / (norm(y) * norm(z)) )
-            
-            pbc_string = "pbc set { $(sum(x)) $(sum(y)) $(sum(z)) $a $b $c } -all"
-
+            a = acosd( dot(x, y) / (norm(x) * norm(y)) )
+            b = acosd( dot(x, z) / (norm(x) * norm(z)) )
+            c = acosd( dot(y, z) / (norm(y) * norm(z)) )
+            return "pbc set { $(sum(x)) $(sum(y)) $(sum(z)) $a $b $c } -all"
         end
     end
-
-    return pbc_string
 end
 
 function get_pressure(logname::String; flag="PRESSURE", unit="bar", last=true)

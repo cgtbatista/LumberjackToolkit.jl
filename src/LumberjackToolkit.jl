@@ -14,14 +14,10 @@ import Statistics: mean, median, std
 import LinearAlgebra: norm, dot, cross, diag, diagm, eigen, det
 
 import Base.Threads: @threads
+
 ## RMSD
 export rmsd_plot
 
-## Density profiles
-#export densityprofile
-#export ρ, δ
-#export averaging_profile, average_bins, binning, _ordering_symmetry, _correct_center, _correct_symmetry, _get_reference
-#export vmd_get_charges
 
 export avg_densityprofile
 
@@ -33,7 +29,7 @@ export WHAM
 
 export pmf1D, pmf2D
 
-export align_trajectory, namd_pbc
+export align_frames, namd_pbc
 export center_of_mass, rmsd
 
 export write_frame!, writepdb_trajectory, lovo_mapping, lovo_fitting
@@ -62,12 +58,12 @@ export chargesPSF, binning, binspecs, align_frames, edp, density_grid
 
 # Getting some properties profiles using the density distribution (e.g. electron density profile of POPC on the box)
 include("./residence_time.jl")
-#include("./density.jl")
+
+include("./density.jl")
+
 include("./dihedrals.jl")
 
 include("./plotting.jl")
-# others
-include("./vmd-scripts.jl")
 
 include("./utils.jl")
 

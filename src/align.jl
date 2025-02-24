@@ -1,55 +1,34 @@
 """
-    align_trajectory(psfname::String, pdbname::String, trajectory::String; ...)
+    vmd_trajectory_alignment(psfname::String, trjname::String; new_trajectory=nothing, selection="not water", reference=0, vmd="vmd", DebugVMD=false)
 
-Aligns a trajectory to a reference structure using VMD. It loads the psf, pdb, and trajectory files, wraps the trajectory, and aligns the frames to the reference structure.
-    The `selection` argument is used to define the atoms to be aligned based on the VMD selection, such as a protein or a cellulose fibril.
-    The `DebugVMD` argument equals  **true** will return  the VMD output. The function returns the path to the new trajectory.
-    If the `new_trajectory` argument is not provided, a temporary file is created.
+Align the frames of a trajectory using the VMD `measure fit` command. The selection can be defined by the user,
+and the default is `not water`. The reference frame can be defined by the user, and the default is `0`.
 
-# Arguments
-- `psfname::String`: The path to the PSF file.
-- `pdbname::String`: The path to the PDB file.
-- `trajectory::String`: The path to the trajectory file.
-- `selection::String`: The VMD selection to be aligned. Default is "protein".
-- `pbc_dimensions::String`: The PBC dimensions to be set on **pbctools format**. If not provided, the function will try to read the dimensions from the .xsc file, based on the location of trajectory.
-- `new_trajectory::String`: The path to the new trajectory file. If not provided, a temporary file is created.
-- `reference::Int`: The frame to be used as reference. Default is 0, the initial frame.
-- `vmd::String`: The path to the VMD executable. Default is "vmd".
-- `DebugVMD::Bool`: If **true**, the function will return the VMD output. Default is **false**.
+### Arguments
+- `psfname::String`: The name of the PSF file.
+- `trjname::String`: The name of the trajectory file. It can be in any format that VMD can read.
+- `new_trajectory::String=nothing`: The name of the new DCD trajectory file. The default creates a temporary file.
+- `selection::String="not water"`: The selection to be used to align the frames.
+- `reference=0`: The reference frame to be used to align the frames.
+- `vmd="vmd"`: The VMD executable. The default is `vmd`.
+- `DebugVMD=false`: If `true`, the output of VMD will be printed.
 """
-function align_trajectory(
-                    psfname::String,
-                    pdbname::String,
-                    trajectory::String;
-                    selection="protein and name CA", pbc_dimensions=nothing, new_trajectory=nothing, reference=0, vmd="vmd", DebugVMD=false
-                )
-    
+function vmd_trajectory_alignment(
+    psfname::String, trjname::String; new_trajectory=nothing,
+    selection="not water", reference::Int64=0,
+    vmd="vmd", DebugVMD=false
+)    
     new_trajectory = isnothing(new_trajectory) ? tempname() * ".dcd" : new_trajectory
-    
-    if isnothing(pbc_dimensions)
-        xscname = replace(trajectory, ".dcd" => ".xsc")
-        pbc_dimensions = namd_pbc(xscname)
-    elseif typeof(pbc_dimensions) == String
-        pbc_dimensions = pbc_dimensions
-    else
-        throw(ArgumentError("The PBC variable must be a string."))
-    end
-
     tcl = tempname() * ".tcl"
-
-    vmdinput = Base.open(tcl, "w")
-    
-    Base.write(vmdinput,"""
+    Base.open(tcl, "w") do file
+        println(file, """
         package require pbctools
 
         mol new     $psfname
-        mol addfile $pdbname
-        mol addfile $trajectory waitfor all
+        mol addfile $trjname waitfor all
         
         animate goto 0
-        $pbc_dimensions
-        pbc wrap -centersel \"$selection\" -center com -compound residue -all
-        
+        pbc wrap -centersel \"$selection\" -center com -compound residue -all        
         set ref_frame $reference
         set ref_selection [atomselect top \"$selection\" frame \$ref_frame]
 
@@ -63,19 +42,12 @@ function align_trajectory(
         }
 
         animate write dcd $new_trajectory
-        """
-        )
-
-    Base.close(vmdinput)
-
-    vmdoutput = split(Base.read(`$vmd -dispdev text -e $tcl`, String), "\n")
-
-    if DebugVMD
-        return vmdoutput, tcl
-    else
-        return new_trajectory
+        """)
     end
+    vmdoutput = Base.read(`$vmd -dispdev text -e $tcl`, String)
+    return DebugVMD ? vmdoutput : new_trajectory
 end
+
 
 """
     map_fractions(atoms::AbstractVector{<:PDBTools.Atom}, trajectory_file::String)

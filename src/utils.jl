@@ -77,21 +77,63 @@ function center_of_mass(simulation::MolSimToolkit.Simulation; selection="all")
 end
 
 function rmsd(pdbname::String, trajectory::String; selection="all", mass=nothing, reference_frame=nothing, show_progress=false, first=1, last=nothing, step=1)
-    
-    return rmsd(MolSimToolkit.Simulation(
-                        pdbname,
-                        trajectory;
-                        first=first, last=last, step=step
-                    ), selection=selection, mass=mass, reference_frame=reference_frame, show_progress=show_progress)
+    simulation = MolSimToolkit.Simulation(pdbname, trajectory; first=first, last=last, step=step)
+    return rmsd(simulation, selection=selection, mass=mass, reference_frame=reference_frame, show_progress=show_progress)
 end
 
 function rmsd(simulation::MolSimToolkit.Simulation; selection="all", mass=nothing, reference_frame=nothing, show_progress=false)
-    
-    return MolSimToolkit.rmsd(
-                    simulation,
-                    PDBTools.selindex(MolSimToolkit.atoms(simulation), selection);
-                    mass=mass, reference_frame=reference_frame, show_progress=show_progress
-                )
+    idx = PDBTools.selindex(MolSimToolkit.atoms(simulation), selection)
+    return MolSimToolkit.rmsd(simulation, idx; mass=mass, reference_frame=reference_frame, show_progress=show_progress)
+end
+
+function rmsd(
+    rmsd::Vector{Vector{Float64}}, timestep::Float64;
+    palette=:seaborn_colorblind, isaverage=false,
+    xlabel="time (ns)", ylabel="RMSD (Å)", labels=nothing,
+)   
+    Plots.gr(size=(1000,800), dpi=900, fmt=:png)
+    Plots.default(palette = palette)
+    Plots.plot(
+        title="", legend=:bottomright, xlabel=xlabel, ylabel=ylabel, fontfamily=:arial,
+        ## Axis configs
+        xlims=(0, length(rmsd[1]) * timestep),
+        framestyle=:box,
+        grid=true,
+        minorgrid=true,
+        minorticks=5,
+        thick_direction=:out,
+        ## Font configs
+        titlefontsize=18,
+        guidefontsize=16,
+        tickfontsize=16,
+        legendfontsize=16,
+        guidefonthalign=:center,
+        ## Margins
+        left_margin=5Plots.Measures.mm,
+        right_margin=10Plots.Measures.mm,
+        top_margin=10Plots.Measures.mm,
+        bottom_margin=1Plots.Measures.mm
+    )
+    if isaverage
+        y = mean(rmsd)
+        x = timestep * (0:length(y)-1)
+        labels = isnothing(labels) ? ["average"] : labels
+        Plots.plot!(
+            x, y,
+            ribbon=std(rmsd),
+            fillalpha=0.3,
+            lwd=5,
+            label=labels
+        )
+    else
+        labels = isnothing(labels) ? ["rep $i" for i in 1:length(rmsd)] : labels
+        for (i, irmsd) in enumerate(rmsd)
+            x = timestep * (0:length(irmsd)-1)
+            y = irmsd
+            Plots.plot!(x, y, label=labels[i], lwd=2)
+        end
+    end    
+    return Plots.current()
 end
 
 """
@@ -435,19 +477,54 @@ end
 
 ### VMD
 
-function execVMD(input::String; vmd::String="vmd")
-    
+function execVMD(input::String; vmd::String="vmd")    
     if !hasVMD(vmd)
         error("VMD executable not found. Please, check if VMD is installed and in your PATH.")
     end
-
     if !isfile(input)
         error("File not found: $input. Be sure to provide a valid file.")
     end
-
     return Base.read(`$vmd -dispdev text -e $input`, String)
 end
 
 function hasVMD(vmd::String)
     return Sys.which(vmd) !== nothing
+end
+
+
+"""
+    chargesPSF(psfname::String)
+
+Extract the partial charges from a PSF file.
+"""
+function chargesPSF(psfname::String; strfield=7)
+    q = Vector{Float64}()
+    natoms = 0.0
+    open(psfname) do file
+        for line in eachline(file)
+            if occursin("!NATOM", line)
+                natoms = parse(Float64, string(split(line)[begin]))
+                continue
+            end
+            if iszero(natoms)
+                continue
+            else
+                qi = string(split(line)[strfield])
+                push!(q, parse(Float64, qi))
+                natoms -= 1
+            end
+        end
+    end
+    return q
+end
+
+function searchsortednearest(vector, x)
+    idx = searchsortedfirst(vector, x)
+    if idx == 1
+        return 1
+    elseif idx > length(vector)
+        return length(vector)
+    else
+        return abs(vector[idx] - x) < abs(vector[idx-1] - x) ? idx : idx - 1
+    end
 end
