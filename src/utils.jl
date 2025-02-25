@@ -86,17 +86,12 @@ function rmsd(simulation::MolSimToolkit.Simulation; selection="all", mass=nothin
     return MolSimToolkit.rmsd(simulation, idx; mass=mass, reference_frame=reference_frame, show_progress=show_progress)
 end
 
-function rmsd(
-    rmsd::Vector{Vector{Float64}}, timestep::Float64;
-    palette=:seaborn_colorblind, isaverage=false,
-    xlabel="time (ns)", ylabel="RMSD (Å)", labels=nothing,
-)   
+function rmsd_plotting_default(xlims::Tuple{Float64, Float64}; xlabel="tempo (ns)", ylabel="RMSD (Å)")
     Plots.gr(size=(1000,800), dpi=900, fmt=:png)
-    Plots.default(palette = palette)
     Plots.plot(
         title="", legend=:bottomright, xlabel=xlabel, ylabel=ylabel, fontfamily=:arial,
         ## Axis configs
-        xlims=(0, length(rmsd[1]) * timestep),
+        xlims=xlims,
         framestyle=:box,
         grid=true,
         minorgrid=true,
@@ -106,6 +101,7 @@ function rmsd(
         titlefontsize=18,
         guidefontsize=16,
         tickfontsize=16,
+        labelfontsize=18,
         legendfontsize=16,
         guidefonthalign=:center,
         ## Margins
@@ -114,25 +110,89 @@ function rmsd(
         top_margin=10Plots.Measures.mm,
         bottom_margin=1Plots.Measures.mm
     )
-    if isaverage
-        y = mean(rmsd)
+    return Plots.current()
+end
+
+function rmsd(rmsd::Vector{Vector{Float64}}, timestep::Float64; palette=:seaborn_colorblind, labels=nothing)   
+    Plots.default(palette = palette)
+    tmax = length(rmsd[1]) * timestep
+    rmsd_plotting_default((0.0, tmax))
+    labels = isnothing(labels) ? ["rep $i" for i in 1:length(rmsd)] : labels
+    for (i, irmsd) in enumerate(rmsd)
+        x = timestep * (0:length(irmsd)-1)
+        y = irmsd
+        Plots.plot!(x, y, label=labels[i], linewidth=2)
+    end
+    return Plots.current()
+end
+
+function rmsd(
+    rmsd::Vector{Matrix{Float64}}, timestep::Float64; palette=:seaborn_colorblind, labels=nothing)   
+    labels = isnothing(labels) ? ["system $i" for i in 1:length(rmsd)] : labels
+    @assert length(labels) == length(rmsd) "The number of labels must be equal to the number of systems."
+    Plots.default(palette = palette)
+    tmax = size(rmsd[1], 1) * timestep
+    rmsd_plotting_default((0.0, tmax))
+    for (i, irmsd) in enumerate(rmsd)
+        y, Δy = mean(irmsd, dims=2), std(irmsd, dims=2)
         x = timestep * (0:length(y)-1)
-        labels = isnothing(labels) ? ["average"] : labels
         Plots.plot!(
             x, y,
-            ribbon=std(rmsd),
+            ribbon=Δy,
             fillalpha=0.3,
-            lwd=5,
-            label=labels
+            linewidth=2,
+            label=labels[i]
         )
-    else
-        labels = isnothing(labels) ? ["rep $i" for i in 1:length(rmsd)] : labels
-        for (i, irmsd) in enumerate(rmsd)
-            x = timestep * (0:length(irmsd)-1)
-            y = irmsd
-            Plots.plot!(x, y, label=labels[i], lwd=2)
-        end
-    end    
+    end
+    return Plots.current()
+end
+
+function rmsd(
+    rmsf::Vector{Matrix{Float64}}, nresidues::Int64; palette=:seaborn_colorblind, labels=nothing)   
+    labels = isnothing(labels) ? ["system $i" for i in 1:length(rmsf)] : labels
+    @assert length(labels) == length(rmsf) "The number of labels must be equal to the number of systems."
+    Plots.default(palette = palette)
+    n = nresidues * 1.0
+    rmsd_plotting_default((1.0, n))
+    for (i, irmsf) in enumerate(rmsf)
+        y, Δy = mean(irmsf, dims=2), std(irmsf, dims=2)
+        x = 1:n
+        Plots.plot!(
+            x, y,
+            ribbon=Δy,
+            fillalpha=0.3,
+            linewidth=2,
+            label=labels[i]
+        )
+    end
+    return Plots.current()
+end
+
+function rmsd(
+    average::Vector{Matrix{Float64}}, low::Vector{Matrix{Float64}}, high::Vector{Matrix{Float64}},
+    timestep::Float64; palette=:seaborn_colorblind, labels=nothing
+)   
+    Plots.default(palette = palette)    
+    labels = isnothing(labels) ? ["system $i" for i in 1:length(average)] : labels
+    @assert length(labels) == length(average) "The number of labels must be equal to the number of systems."
+    @assert length(average) == length(low) == length(high) "The number of systems must be the same for all RMSD data."
+    tmax = size(average[1], 1) * timestep
+    rmsd_plotting_default((0.0, tmax))
+    for (label, avg, l, h) in zip(labels, average, low, high)
+        y = mean(avg, dims=2)
+        ylow, yhigh = mean(l, dims=2), mean(h, dims=2)
+        x = timestep * (0:length(y)-1)
+        p = Plots.plot!(
+            x, y,
+            ribbon=(y-ylow, yhigh-y),
+            fillalpha=0.3,
+            linewidth=3,
+            label=label
+        )
+        icolor = p.series_list[end].plotattributes[:linecolor]
+        Plots.plot!(x, ylow, linestyle=:dashdot, color=icolor, linewidth=0.75, labels = "")
+        Plots.plot!(x, yhigh, linestyle=:dashdot, color=icolor, linewidth=0.75, labels = "")
+    end
     return Plots.current()
 end
 

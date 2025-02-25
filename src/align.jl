@@ -13,7 +13,7 @@ and the default is `not water`. The reference frame can be defined by the user, 
 - `vmd="vmd"`: The VMD executable. The default is `vmd`.
 - `DebugVMD=false`: If `true`, the output of VMD will be printed.
 """
-function vmd_trajectory_alignment(
+function align_frames(
     psfname::String, trjname::String; new_trajectory=nothing,
     selection="not water", reference::Int64=0,
     vmd="vmd", DebugVMD=false
@@ -55,29 +55,26 @@ end
 
 """
 function lovo_mapping(
-                    pdbname::String, 
-                    trajectory::String;
-                    selection="protein and name CA",
-                    first=1, last=nothing, step=1
-                )
-
-    tmp_trajectory = writepdb_trajectory(pdbname, trajectory; selection=selection, first=first, last=last, step=step)
-
+    pdbname::String, 
+    trajectory::String;
+    selection="protein and name CA",
+    first=1, last=nothing, step=1
+)
+    trj = writepdb_trajectory(
+        pdbname, trajectory; selection=selection, first=first, last=last, step=step
+    )
     mapfractions = tempname() * ".out"
-
     mdlovofit() do exe
-        run(pipeline(`$exe -mapfrac $tmp_trajectory`; stdout=mapfractions))
+        run(pipeline(`$exe -mapfrac $trj`; stdout=mapfractions))
     end
-
     data = readdlm(mapfractions, comments=true, comment_char='#')
     range = 1:findlast(<(1), data[:,1])
     fraction, RMSDl, RMSDh, RMSD = data[range,1], data[range,2], data[range,3], data[range,4]
-
     println("""
     -----------------
     Mapping Fractions
     -----------------
-    $tmp_trajectory, $mapfractions
+    $trj, $mapfractions
     
     Greatest fraction for which the RMSD-low is smaller than 1: $(round(fraction[findlast(<(1.0), RMSDl)],digits=2))
 
@@ -86,45 +83,34 @@ function lovo_mapping(
     RMSDh   : contains the RMSD of the fraction not considered for the alignment.
     RMSD    : contains the RMSD of the whole structure.
     """)
-
     return fraction, RMSDl, RMSDh, RMSD
 end
 
 
 function lovo_fitting(
-                    pdbname::String, 
-                    trajectory::String,
-                    fraction::AbstractFloat;
-                    selection="protein and name CA", alignedPDB=nothing, atoms2consider=nothing, reference=1,
-                    first=1, last=nothing, step=1
-                )
-    
+    pdbname::String, trajectory::String, fraction::AbstractFloat;
+    selection="protein", fitting="protein and name CA", alignedPDB=nothing, reference=1,
+    first=1, last=nothing, step=1
+)    
     atoms = PDBTools.readPDB(pdbname, selection)
-    tmp_trajectory = writepdb_trajectory(pdbname, trajectory; selection=selection, first=first, last=last, step=step)
-    
-    if isnothing(atoms2consider)
-        atoms2consider = atoms
-    elseif !isnothing(atoms2consider) && (typeof(atoms2consider) != AbstractVector{<:PDBTools.Atom})
-        throw(ArgumentError("The atoms2consider variable must be an AbstractVector{<:PDBTools.Atom}."))
-    end
-
-    idx_map = Dict(atom.index => idx for (idx, atom) in enumerate(atoms2consider))
-
+    tmp_trajectory = writepdb_trajectory(
+        pdbname, trajectory;
+        selection=selection, first=first, last=last, step=step
+    )
+    fitatoms = isnothing(fitting) ? atoms : PDBTools.readPDB(pdbname, fitting)
+    idx_map = Dict(atom.index => idx for (idx, atom) in enumerate(fitatoms))
     tempPDB_atoms2consider = tempname() * ".pdb"
     for atom in atoms
         idx = get(idx_map, atom.index, nothing)
         if !isnothing(idx)
-            atoms[idx].beta = 1.0
+            atom.beta = 1.0
         else
-            atoms[idx].beta = 0.0
+            atom.beta = 0.0
         end
     end
     PDBTools.writePDB(atoms, tempPDB_atoms2consider)
-
     rmsf_output, fitting_output = tempname() * ".rmsf", tempname() * ".out"
-    
     alignedPDB = isnothing(alignedPDB) ? tempname() * ".pdb" : alignedPDB
-    
     try
         mdlovofit() do exe
             run(pipeline(`$exe -f $fraction -iref $reference -rmsf $rmsf_output -t $alignedPDB $tmp_trajectory`; stdout=fitting_output))
@@ -133,12 +119,9 @@ function lovo_fitting(
         "ERROR in MDLovoFit execution"
         "Command executed: $command"
     end
-
     data = readdlm(fitting_output; comments=true, comment_char='#')
-    
     RMSDl, RMSDh, RMSD = data[:,2], data[:,3], data[:,4]
     RMSF = readdlm(rmsf_output; comments=true, comment_char='#')[:,2]
-
     println("""
     ------------
     LOVO Fitting
@@ -151,6 +134,5 @@ function lovo_fitting(
 
     RMSF data is based on $(length(RMSF)) atoms.
     """)
-
     return RMSDl, RMSDh, RMSD, RMSF
 end
