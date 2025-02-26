@@ -5,6 +5,7 @@ import EasyFit
 import MolSimToolkit
 import StatsPlots, Plots
 
+import Interpolations
 import FFTW: rfft, irfft
 import MDLovoFit_jll: mdlovofit
 import DelimitedFiles: readdlm

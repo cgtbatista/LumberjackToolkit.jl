@@ -86,10 +86,14 @@ function rmsd(simulation::MolSimToolkit.Simulation; selection="all", mass=nothin
     return MolSimToolkit.rmsd(simulation, idx; mass=mass, reference_frame=reference_frame, show_progress=show_progress)
 end
 
+const mycolorblind = [
+    "#0173B2", "#DE8F05", "#029E73", "#D55E00", "#CC78BC",
+    "#CA9161", "#FBAFE4", "#949494", "#ECE133", "#56B4E9"]
+
 function rmsd_plotting_default(xlims::Tuple{Float64, Float64}; xlabel="tempo (ns)", ylabel="RMSD (Å)")
     Plots.gr(size=(1000,800), dpi=900, fmt=:png)
     Plots.plot(
-        title="", legend=:bottomright, xlabel=xlabel, ylabel=ylabel, fontfamily=:arial,
+        title="", legend=:topleft, xlabel=xlabel, ylabel=ylabel, fontfamily=:arial,
         ## Axis configs
         xlims=xlims,
         framestyle=:box,
@@ -113,7 +117,7 @@ function rmsd_plotting_default(xlims::Tuple{Float64, Float64}; xlabel="tempo (ns
     return Plots.current()
 end
 
-function rmsd(rmsd::Vector{Vector{Float64}}, timestep::Float64; palette=:seaborn_colorblind, labels=nothing)   
+function rmsd(rmsd::Vector{Vector{Float64}}, timestep::Float64; palette=mycolorblind, labels=nothing)   
     Plots.default(palette = palette)
     tmax = length(rmsd[1]) * timestep
     rmsd_plotting_default((0.0, tmax))
@@ -148,7 +152,7 @@ function rmsd(
 end
 
 function rmsd(
-    rmsf::Vector{Matrix{Float64}}, nresidues::Int64; palette=:seaborn_colorblind, labels=nothing)   
+    rmsf::Vector{Matrix{Float64}}, nresidues::Int64; palette=mycolorblind, labels=nothing)   
     labels = isnothing(labels) ? ["system $i" for i in 1:length(rmsf)] : labels
     @assert length(labels) == length(rmsf) "The number of labels must be equal to the number of systems."
     Plots.default(palette = palette)
@@ -170,7 +174,7 @@ end
 
 function rmsd(
     average::Vector{Matrix{Float64}}, low::Vector{Matrix{Float64}}, high::Vector{Matrix{Float64}},
-    timestep::Float64; palette=:seaborn_colorblind, labels=nothing
+    timestep::Float64; palette=mycolorblind, labels=nothing
 )   
     Plots.default(palette = palette)    
     labels = isnothing(labels) ? ["system $i" for i in 1:length(average)] : labels
@@ -178,7 +182,7 @@ function rmsd(
     @assert length(average) == length(low) == length(high) "The number of systems must be the same for all RMSD data."
     tmax = size(average[1], 1) * timestep
     rmsd_plotting_default((0.0, tmax))
-    for (label, avg, l, h) in zip(labels, average, low, high)
+    for (i, (label, avg, l, h)) in enumerate(zip(labels, average, low, high))
         y = mean(avg, dims=2)
         ylow, yhigh = mean(l, dims=2), mean(h, dims=2)
         x = timestep * (0:length(y)-1)
@@ -186,6 +190,7 @@ function rmsd(
             x, y,
             ribbon=(y-ylow, yhigh-y),
             fillalpha=0.3,
+            color=mycolorblind[i],
             linewidth=3,
             label=label
         )
