@@ -1,54 +1,92 @@
-function edp(
-    pdbname::String, trjname::String; first=1, last=nothing, step=1,
-    psfname=nothing, selection="not water", isdimensionless=true,
-    axis="z", cutoff=4.0, resolution=0.6, e=nothing, σ=1.0,
-    hascenter=true, hassymmetry=true
-)
-    if !in(lowercase(axis), Set(["x", "y", "z", "xy", "xz", "yz", "yx", "zx", "zy"]))
-        throw(ArgumentError("""
-        The axis should be associated with the labels of cartesian axes or plane.
-        Please insert it such as: `x`, `y`, `z`, `xy`, `xz`, or `yz`.
-        """))
-    end
-    atoms = PDBTools.select(PDBTools.readPDB(pdbname), selection)
-    sim = MolSimToolkit.Simulation(atoms, trjname, first=first, last=last, step=step)
+function electrons(pdbname::String; charges=true, psfname=nothing)
+    @assert isfile(pdbname) "The PDB file does not exist."
     psfname = isnothing(psfname) ? replace(pdbname, ".pdb" => ".psf") : psfname
-    #e = isnothing(e) ? chargesPSF(psfname)[PDBTools.index.(atoms)] : e
-    e = isnothing(e) ? abs.(chargesPSF(psfname)) : e
-    hascenter = hassymmetry ? true : hascenter
-    if length(axis) == 1
-        if isdimensionless
-            return edp_1d_dimensionless(
-                sim, e,
-                axis=axis, cutoff=cutoff, hascenter=hascenter, hassymmetry=hassymmetry
-            )
-        else
-            return edp_1d_gaussian(
-                sim, e,
-                axis=axis, cutoff=cutoff, σ=σ, hascenter=hascenter, hassymmetry=hassymmetry
-            )
-        end
-    elseif length(axis) == 2
-        if isdimensionless
-            return edp_2d_dimensionless(
-                sim, e,
-                axis=axis, cutoff=cutoff, hascenter=hascenter, hassymmetry=hassymmetry
-            )
-        else
-            return edp_2d_gaussian(
-                sim, e,
-                axis=axis, cutoff=cutoff, σ=σ, hascenter=hascenter, hassymmetry=hassymmetry
-            )
-        end
+    @assert isfile(psfname) || (isnothing(psfname) && !charges) "The PSF file does not exist."
+    el = PDBTools.atomic_number.(PDBTools.readPDB(pdbname))
+    if charges
+        q = chargesPSF(psfname)
+        @assert length(el) == length(q) "The number of charges should be the same as the number of atoms."
+        return el .- q
     else
-        throw(ArgumentError("The axis should be a string with one or two characters."))
+        return el
     end
 end
 
-function edp_1d_dimensionless(
-    sim::MolSimToolkit.Simulation, electrons::Vector{Float64};
-    axis="z", cutoff=1.0, hascenter=true, hassymmetry=true
+## sqrt((3V/4π)/m)
+function density_grid(coords::Vector{SVector{3, Float64}}, resolution::Float64)
+    xlower, xupper = extrema([ coord[1] for coord in coords ])
+    ylower, yupper = extrema([ coord[2] for coord in coords ])
+    zlower, zupper = extrema([ coord[3] for coord in coords ])
+    points = SVector{3, Float64}[]
+    for x in xlower:resolution:xupper, y in ylower:resolution:yupper, z in zlower:resolution:zupper
+        push!(points, SVector(x, y, z))
+    end
+    return points
+end
+
+function density_grid(coords::MolSimToolkit.FramePositions, resolution::Float64)
+    coords = [ SVector(coord) for coord in coords ]
+    return density_grid(coords, resolution) 
+end
+
+function density_profile(
+    pdbname::String, trjname::String, property::Vector{Float64};
+    selection="not water", isdimensionless=true,  axis="z", cutoff=4.0, resolution=0.6, σ=1.0,
+    hascenter=true, hassymmetry=true, first=1, last=nothing, step=1
 )
+    @assert isnothing(last) || last > first "The last frame should be greater than the first frame."
+    @assert isfile(pdbname) && isfile(trjname) "The PDB or trajectory file does not exist."
+    @assert in(lowercase(axis), Set(["x", "y", "z", "xy", "xz", "yz", "yx", "zx", "zy"])) "This axis is not available."
+    selection = isnothing(selection) || "" ? "all" : selection
+    atoms = PDBTools.select(PDBTools.readPDB(pdbname), selection)
+    sim = MolSimToolkit.Simulation(atoms, trjname, first=first, last=last, step=step)
+    return density_profile(
+        sim, property, axis=axis, cutoff=cutoff, isdimensionless=isdimensionless, σ=σ, resolution=resolution, hascenter=hascenter, hassymmetry=hassymmetry
+    )
+end
+
+function density_profile(
+    sim::MolSimToolkit.Simulation, property::Vector{Float64}; isdimensionless=true,
+    axis="z", cutoff=4.0,
+    resolution=0.6, σ=1.0,          ## only for gaussian profile
+    hascenter=true, hassymmetry=true
+)
+    @assert in(lowercase(axis), Set(["x", "y", "z", "xy", "xz", "yz", "yx", "zx", "zy"])) "This axis should be cartesian (e.g. `x` or `xz`)."
+    @assert length(sim.atoms) == length(property) "The number of atoms should be the same as the number of properties."
+    hascenter = hassymmetry ? true : hascenter
+    if isdimensionless
+        return density_profile_dimensionless(
+            sim, property, axis=axis, cutoff=cutoff, hascenter=hascenter, hassymmetry=hassymmetry
+        )
+    else
+        return density_profile_gaussian(
+            sim, property, axis=axis, cutoff=cutoff, σ=σ, resolution=resolution, hascenter=hascenter, hassymmetry=hassymmetry
+        )
+    end
+end
+
+function density_profile_dimensionless(sim::MolSimToolkit.Simulation, property::Vector{Float64}; axis="z", cutoff=1.0, hascenter=true, hassymmetry=true)
+    if length(axis) == 1
+        return dimensionless_profile_1D(sim, property, axis=axis, cutoff=cutoff, hascenter=hascenter, hassymmetry=hassymmetry)
+    elseif length(axis) == 2
+        return dimensionless_profile_2D(sim, property, axis=axis, cutoff=cutoff, hascenter=hascenter, hassymmetry=hassymmetry)
+    else
+        throw(ArgumentError("The axis should be a string with one or two characters (e.g. `z`, `x`, `xy`)."))
+    end
+end
+
+function density_profile_gaussian(
+    sim::MolSimToolkit.Simulation, property::Vector{Float64}; axis="z", resolution=0.5, cutoff=1.0, σ=1.0, hascenter=true, hassymmetry=true)
+    if length(axis) == 1
+        return gaussian_profile_1D(sim, property, axis=axis, cutoff=cutoff, resolution=resolution, σ=σ, hascenter=hascenter, hassymmetry=hassymmetry)
+    elseif length(axis) == 2
+        return gaussian_profile_2D(sim, property, axis=axis, cutoff=cutoff, resolution=resolution, σ=σ, hascenter=hascenter, hassymmetry=hassymmetry)
+    else
+        throw(ArgumentError("The axis should be a string with one or two characters (e.g. `z`, `x`, `xy`)."))
+    end
+end
+
+function dimensionless_profile_1D(sim::MolSimToolkit.Simulation, Q::Vector{Float64}; axis="z", cutoff=1.0, hascenter=true, hassymmetry=true)
     axescode = Dict{String, Int64}("x" => 1, "y" => 2, "z" => 3)
     if haskey(axescode, lowercase(axis))
         dim = axescode[axis]
@@ -63,7 +101,7 @@ function edp_1d_dimensionless(
         coords = [ coord[dim] for coord in MolSimToolkit.positions(frame)[iatoms] ]
         for i in 1:length(bin)-1
             idx = findall(coord -> bin[i] <= coord <= bin[i+1], coords)
-            densities[i, iframe] = !isempty(idx) ? V \ sum(electrons[iatoms][idx]) : 0.0
+            densities[i, iframe] = !isempty(idx) ? V \ sum(Q[iatoms][idx]) : 0.0
         end
         if !hascenter
             bins[:,iframe] = avgbins(bin)
@@ -83,10 +121,7 @@ function edp_1d_dimensionless(
     return bins, densities
 end
 
-function edp_2d_dimensionless(
-    sim::MolSimToolkit.Simulation, electrons::Vector{Float64};
-    axis="xz", cutoff=1.0, hascenter=true, hassymmetry=true
-)
+function dimensionless_profile_2D(sim::MolSimToolkit.Simulation, Q::Vector{Float64}; axis="xz", cutoff=1.0, hascenter=true, hassymmetry=true)
     axescode = Dict{String, Function}([
         ["xy", "yx"] .=> () -> [1,2]; ["xz", "zx"] .=> () -> [1,3]; ["yz", "zy"] .=> () -> [2,3]
     ])
@@ -96,12 +131,10 @@ function edp_2d_dimensionless(
         bins1 = Matrix{Float64}(undef, length(bin1)-1, length(sim))
         bins2 = Matrix{Float64}(undef, length(bin2)-1, length(sim))
         densities = Array{Float64, 3}(undef, length(bin1)-1, length(bin2)-1, length(sim))
-        #density = Matrix{Float64}(undef, length(bin1)-1, length(bin2)-1)
     else
         throw(ArgumentError("The axis should be associated with the labels of cartesian axes."))
     end
     iatoms = PDBTools.index.(sim.atoms)
-    #densities = Vector{Matrix{Float64}}(undef, length(sim))
     for (iframe, frame) in enumerate(sim)
         coords = [ coord[dims] for coord in MolSimToolkit.positions(frame)[iatoms] ]
         for i in 1:length(bin1)-1, j in 1:length(bin2)-1
@@ -109,9 +142,8 @@ function edp_2d_dimensionless(
                 coord -> (bin1[i] <= coord[1] <= bin1[i+1]) && (bin2[j] <= coord[2] <= bin2[j+1]),
                 coords
             )
-            densities[i,j,iframe] = !isempty(idx) ? V \ sum(electrons[iatoms][idx]) : 0.0
+            densities[i,j,iframe] = !isempty(idx) ? V \ sum(Q[iatoms][idx]) : 0.0
         end
-        #densities[iframe] = deepcopy(density)
         if !hascenter
             bins1[:,iframe], bins2[:,iframe] = avgbins(bin1), avgbins(bin2)
         else
@@ -133,26 +165,53 @@ function edp_2d_dimensionless(
     return bins1, bins2, densities
 end
 
-## sqrt((3V/4π)/m)
-function density_grid(coords::Vector{SVector{3, Float64}}, resolution::Float64)
-    xlower, xupper = extrema([ coord[1] for coord in coords ])
-    ylower, yupper = extrema([ coord[2] for coord in coords ])
-    zlower, zupper = extrema([ coord[3] for coord in coords ])
-    points = SVector{3, Float64}[]
-    for x in xlower:resolution:xupper, y in ylower:resolution:yupper, z in zlower:resolution:zupper
-        push!(points, SVector(x, y, z))
-    end
-    return points
-end
+# function dimensionless_profile_2D(sim::MolSimToolkit.Simulation, Q::Vector{Float64}; axis="xz", cutoff=1.0, hascenter=true, hassymmetry=true)
+#     axescode = Dict{String, Function}([
+#         ["xy", "yx"] .=> () -> [1,2]; ["xz", "zx"] .=> () -> [1,3]; ["yz", "zy"] .=> () -> [2,3]
+#     ])
+#     if haskey(axescode, lowercase(axis))
+#         dims = axescode[axis]()
+#         V, bin1, bin2 = binning(sim, axis=axis, cutoff=cutoff)
+#         bins1 = Matrix{Float64}(undef, length(bin1)-1, length(sim))
+#         bins2 = Matrix{Float64}(undef, length(bin2)-1, length(sim))
+#         densities = Array{Float64, 3}(undef, length(bin1)-1, length(bin2)-1, length(sim))
+#     else
+#         throw(ArgumentError("The axis should be associated with the labels of cartesian axes."))
+#     end
+#     iatoms = PDBTools.index.(sim.atoms)
+#     for (iframe, frame) in enumerate(sim)
+#         coords = [ coord[dims] for coord in MolSimToolkit.positions(frame)[iatoms] ]
+#         for i in 1:length(bin1)-1, j in 1:length(bin2)-1
+#             idx = findall(
+#                 coord -> (bin1[i] <= coord[1] <= bin1[i+1]) && (bin2[j] <= coord[2] <= bin2[j+1]),
+#                 coords
+#             )
+#             densities[i,j,iframe] = !isempty(idx) ? V \ sum(Q[iatoms][idx]) : 0.0
+#         end
+#         if !hascenter
+#             bins1[:,iframe], bins2[:,iframe] = avgbins(bin1), avgbins(bin2)
+#         else
+#             avg = mean(coords)
+#             if hassymmetry
+#                 bins1[:,iframe] = _fix_binning_symmetry(bin1, avg[1])
+#                 bins2[:,iframe] = _fix_binning_symmetry(bin2, avg[2])
+#                 if !issorted(bins1[:,iframe]) || !issorted(bins2[:,iframe])
+#                     isorted, jsorted = sortperm(bins1[:,iframe]), sortperm(bins2[:,iframe])
+#                     bins1[:,iframe], bins2[:,iframe] = bins1[isorted,iframe], bins2[jsorted,iframe]
+#                     densities[:,:,iframe] = densities[isorted,jsorted,iframe]
+#                 end
+#             else
+#                 bins1[:,iframe] = _fix_binning_center(bin1, avg[1])
+#                 bins2[:,iframe] = _fix_binning_center(bin2, avg[2])
+#             end
+#         end
+#     end
+#     return bins1, bins2, densities
+# end
 
-function density_grid(coords::MolSimToolkit.FramePositions, resolution::Float64)
-    coords = [ SVector(coord) for coord in coords ]
-    return density_grid(coords, resolution) 
-end
-
-function edp_1d_gaussian(
-    sim::MolSimToolkit.Simulation, electrons::Vector{Float64};
-    axis="z", cutoff=1.0, σ=1.0, hascenter=true, hassymmetry=true
+function gaussian_profile_1D(
+    sim::MolSimToolkit.Simulation, Q::Vector{Float64};
+    axis="z", cutoff=1.0, resolution=0.5, σ=1.0, hascenter=true, hassymmetry=true
 )
     axescode = Dict{String, Int64}("x" => 1, "y" => 2, "z" => 3)
     if haskey(axescode, lowercase(axis))
@@ -167,12 +226,12 @@ function edp_1d_gaussian(
     for (iframe, frame) in enumerate(sim)
         coords = MolSimToolkit.positions(frame)[iatoms]
         σ = σ .* ones(Float64, length(iatoms))
-        A = electrons[iatoms] ./ (sqrt(2π) .* σ).^3
+        A = Q[iatoms] ./ (sqrt(2π) .* σ).^3
         α = inv.(-2σ.^2)
         ρ(r) = sum(
             A .* exp.(α .* [ sum((r .- coord).^2) for coord in coords ])
         )
-        points = density_grid(coords, cutoff)
+        points = density_grid(coords, resolution)
         density = ρ.(points)
         for i in 1:length(bin)-1
             idx = findall(
@@ -199,9 +258,9 @@ function edp_1d_gaussian(
     return bins, densities
 end
 
-function edp_2d_gaussian(
-    sim::MolSimToolkit.Simulation, electrons::Vector{Float64};
-    axis="xz", cutoff=1.0, σ=1.0, hascenter=true, hassymmetry=true
+function gaussian_profile_2D(
+    sim::MolSimToolkit.Simulation, Q::Vector{Float64};
+    axis="xz", cutoff=1.0, resolution=0.5, σ=1.0, hascenter=true, hassymmetry=true
 )
     axescode = Dict{String, Function}([
         ["xy", "yx"] .=> () -> [1,2]; ["xz", "zx"] .=> () -> [1,3]; ["yz", "zy"] .=> () -> [2,3]
@@ -219,12 +278,12 @@ function edp_2d_gaussian(
     for (iframe, frame) in enumerate(sim)
         coords = MolSimToolkit.positions(frame)[iatoms]
         σ = σ .* ones(Float64, length(iatoms))
-        A = electrons[iatoms] ./ (sqrt(2π) .* σ).^3
-        α = inv.(-2σ.^2)
+        A = Q[iatoms] ./ (sqrt(2π) .* σ).^3
+        α = inv.(-2σ .^ 2)
         ρ(r) = sum(
             A .* exp.(α .* [ sum((r .- coord).^2) for coord in coords ])
         )
-        points = density_grid(coords, cutoff)
+        points = density_grid(coords, resolution)
         density = ρ.(points)
         #fill!(densities[:,:,iframe], 0.0)
         ibin = [ searchsortedfirst(bin1, point[dims[1]]) for point in points ]
@@ -391,36 +450,7 @@ function fibrilwidth(
     return d
 end
 
-function edp_plotting_default(
-    xlims::Tuple{Float64, Float64}, ylims::Tuple{Float64, Float64}; xlabel="x-axis (Å)", ylabel="y-axis (Å)"
-)
-    Plots.gr(size=(1000,800), dpi=900, fmt=:png)
-    Plots.heatmap(
-        title="", legend=:topleft, xlabel=xlabel, ylabel=ylabel, fontfamily=:arial,
-        ## Axis configs
-        xlims=xlims, ylims=ylims,
-        framestyle=:box,
-        grid=true,
-        minorgrid=true,
-        minorticks=5,
-        thick_direction=:out,
-        ## Font configs
-        titlefontsize=18,
-        guidefontsize=16,
-        tickfontsize=16,
-        labelfontsize=18,
-        legendfontsize=16,
-        guidefonthalign=:center,
-        ## Margins
-        left_margin=5Plots.Measures.mm,
-        right_margin=10Plots.Measures.mm,
-        top_margin=10Plots.Measures.mm,
-        bottom_margin=1Plots.Measures.mm
-    )
-    return Plots.current()
-end
-
-function edp(
+function density_profile(
     bin1::Matrix{Float64}, bin2::Matrix{Float64}, densities::Array{Float64, 3};
     frame=nothing, smoothing=false, bins=200, colors=:Greens,
     xlabel="x-axis (Å)", ylabel="y-axis (Å)", xlims=nothing, ylims=nothing
@@ -493,3 +523,4 @@ function interpol(x::Vector{Float64}, y::Vector{Float64}, z::Matrix{Float64}; bi
     znew = [ itp(i,j) for i in xnew, j in ynew ]
     return xnew, ynew, znew
 end
+

@@ -223,52 +223,6 @@ function water_segment(pdbfile::String, trajectory::String, segment::String; non
 
 end
 
-# function mapwater(
-#     pdbname::String,
-#     trjname::String; first=1, step=1, last=nothing,
-#     selection="not water", water_selection="water",
-#     without_hydrogens=true,
-#     cutoff=10.0,
-#     filename=nothing
-# )
-#     simulation = MolSimToolkit.Simulation(pdbname, trjname, first=first, step=step, last=last)
-#     return mapwater(
-#         simulation,
-#         selection = selection, water_selection = water_selection,
-#         without_hydrogens = without_hydrogens,
-#         cutoff = cutoff,
-#         filename = filename
-#     )
-# end
-
-## CELLULOSE
-# selection = atom -> (
-#     atom.segname == "A24" || atom.segname == "A23" || atom.segname == "A30" || atom.segname == "A29" || atom.segname == "A28" || atom.segname == "A19" ||
-#     atom.segname == "A11" || atom.segname == "A12" || atom.segname == "A5"  || atom.segname == "A6"  || atom.segname == "A7"  || atom.segname == "A16" ||
-#     atom.segname == "B24" || atom.segname == "B23" || atom.segname == "B30" || atom.segname == "B29" || atom.segname == "B28" || atom.segname == "B19" ||
-#     atom.segname == "B11" || atom.segname == "B12" || atom.segname == "B5"  || atom.segname == "B6"  || atom.segname == "B7"  || atom.segname == "B16" ||
-#     atom.segname == "C24" || atom.segname == "C23" || atom.segname == "C30" || atom.segname == "C29" || atom.segname == "C28" || atom.segname == "C19" ||
-#     atom.segname == "C11" || atom.segname == "C12" || atom.segname == "C5"  || atom.segname == "C6"  || atom.segname == "C7"  || atom.segname == "C16" ||
-#     atom.segname == "D24" || atom.segname == "D23" || atom.segname == "D30" || atom.segname == "D29" || atom.segname == "D28" || atom.segname == "D19" ||
-#     atom.segname == "D11" || atom.segname == "D12" || atom.segname == "D5"  || atom.segname == "D6"  || atom.segname == "D7"  || atom.segname == "D16" ||
-#     atom.segname == "E24" || atom.segname == "E23" || atom.segname == "E30" || atom.segname == "E29" || atom.segname == "E28" || atom.segname == "E19" ||
-#     atom.segname == "E11" || atom.segname == "E12" || atom.segname == "E5"  || atom.segname == "E6"  || atom.segname == "E7"  || atom.segname == "E16" ||
-#     atom.segname == "F24" || atom.segname == "F23" || atom.segname == "F30" || atom.segname == "F29" || atom.segname == "F28" || atom.segname == "F19" ||
-#     atom.segname == "F11" || atom.segname == "F12" || atom.segname == "F5"  || atom.segname == "F6"  || atom.segname == "F7"  || atom.segname == "F16"
-#     )
-# )
-##xylans = [ "XA17", "XB17", "XC17", "XA18", "XB18", "XC18", "XA19", "XB19", "XC19", "XA20", "XB20", "XC20", "XY1", "XY2", "XY3", "XY4", "XY5", "XY6", "XY7", "XY8", "XY9", "XY10", "XY11", "XY12", "XY13", "XY14", "XY15", "XY16", "XY21", "XY22" ]
-##xylans = [ "XA17", "XA18", "XA19", "XA20", "XB17", "XB18", "XB19", "XB20", "XC17", "XC18", "XC19", "XC20", "XY6", "XY21", "XY22" ]
-
-## mannans = [ "MA25", "MB25", "MC25", "MA26", "MB26", "MC26", "MA27", "MB27", "MC27", "MA28", "MB28", "MC28", "MA29", "MB29", "MC29", "MA30", "MB30", "MC30", "AN1", "AN2", "AN3", "AN4", "AN5", "AN6", "AN7", "AN8", "AN9", "AN10", "AN11", "AN12", "AN13", "AN14", "AN15", "AN16", "AN31", "AN32", "AN17", "AN18", "AN19", "AN20", "AN21", "AN22", "AN23", "AN24", "AN33" ]
-## mannans = [ "AN16", "AN31", "AN32", "MA25", "MB25", "MC25", "MA26", "MB26", "MC26", "MA27", "MB27", "MC27", "MA28", "MB28", "MC28", "AN33", "MA29", "MB29", "MC29", "MA30", "MB30", "MC30" ]
-
-## XYLAN
-# XY1 XY2 XY3 XY4 XY5 XY6 XY7 XY8 XY9 XY10 XY11 XY12 XY13 XY14 XY15 XY16 XY21 XY22 XA17 XB17 XC17 XA18 XB18 XC18 XA19 XB19 XC19 XA20 XB20 XC20
-
-## MANNAN
-# AN1 AN2 AN3 AN4 AN5 AN6 AN7 AN8 AN9 AN10 AN11 AN12 AN13 AN14 AN15 AN16 AN17 AN18 AN19 AN20 AN21 AN22 AN23 AN24 AN31 AN32 AN33 MA25 MB25 MC25 MA26 MB26 MC26 MA27 MB27 MC27 MA28 MB28 MC28 MA29 MB29 MC29 MA30 MB30 MC30
-
 function mapwater(
     pdbname::String, trjname::String;
     first=1, step=1, last=nothing,

@@ -1,10 +1,6 @@
-function coef_diffusion(t, msd; d=3)
-
-    fit = EasyFit.fitlinear(
-                        t,
-                        msd
-                    )
-    D = fit.a * inv(2d)
+function diffusion(t, msd; dim=3, timestep=0.1)
+    fit = EasyFit.fitlinear(timestep .* t, msd)
+    D = fit.a * inv(2*dim)
     println("""
     Diffusion coefficient: $D Å² / ns
     
@@ -12,11 +8,6 @@ function coef_diffusion(t, msd; d=3)
            y = $(fit.a) * x + $(fit.b);     R² = $(fit.R)
     """)
     return D * 1.0E+9 * (1.0E-8)^2 # to cm²/s
-end
-
-function diffusion(pdbname::String, trjname::String)
-    pdbname, trjname = testfiles()
-    coef_diffusion(pdbname, trjname)
 end
 
 """
@@ -42,10 +33,8 @@ function msd(trajectory::Vector{Vector{SVector{3, Float64}}}; step=1, dims=colle
     if step <= 0
         throw(ArgumentError("step must be greater than 0"))
     end
-
     N, tmax = length(trajectory), length(trajectory[1])
     τ = timelag(tmax, step)
-
     MSD = zeros(Float64, length(τ)) 
     for (i, Δt) in enumerate(τ)
         Σ = 0.0
@@ -60,8 +49,8 @@ function msd(trajectory::Vector{Vector{SVector{3, Float64}}}; step=1, dims=colle
     return τ, MSD
 end
 
-function timelag(tmax::Int64, Δt::Int64)
+function timelag(nframes::Int64, Δf::Int64)
     return collect(
-        0:Δt:(tmax-Δt)
+        0:Δf:(nframes-Δf)
     )
 end
