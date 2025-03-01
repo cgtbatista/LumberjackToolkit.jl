@@ -76,6 +76,61 @@ function center_of_mass(simulation::MolSimToolkit.Simulation; selection="all")
     return com
 end
 
+function catalytic_distances(
+    pdbname::String, trajectory::String,
+    idx0::AbstractVector{<:Integer}, idx1::AbstractVector{<:Integer};
+    first=1, last=nothing, step=1
+)
+    simulation = MolSimToolkit.Simulation(
+        pdbname, trajectory; first=first, last=last, step=step
+    )
+    return catalytic_distances(simulation, idx0, idx1)
+end
+
+function catalytic_distances(
+    simulation::MolSimToolkit.Simulation,
+    idx0::AbstractVector{<:Integer},
+    idx1::AbstractVector{<:Integer}
+)
+    return MolSimToolkit.distances(simulation, idx0, idx1)
+end
+
+function catalytic_distances(dist1::Vector{Float64}, dist2::Vector{Float64})
+    Plots.gr(size=(1000,800), dpi=900, fmt=:png)
+    Plots.scatter(
+        dist1, dist2,
+        xlabel="distância O-Asp140 (Å)", ylabel="distância Asp140-Asp94 (Å)", labels="por frame",
+        title="", fontfamily=:arial, alfa=0.5, color = "#0173B2",
+        ## Axis configs
+        framestyle=:box,
+        grid=true,
+        minorgrid=true,
+        minorticks=5,
+        thick_direction=:out,
+        ## Font configs
+        titlefontsize=18,
+        guidefontsize=16,
+        tickfontsize=16,
+        labelfontsize=18,
+        legendfontsize=16,
+        guidefonthalign=:center,
+        ## Margins
+        left_margin=5Plots.Measures.mm,
+        right_margin=10Plots.Measures.mm,
+        top_margin=10Plots.Measures.mm,
+        bottom_margin=1Plots.Measures.mm
+    )
+    avg_d1, avg_d2 = mean(dist1), mean(dist2)
+    std_d1, std_d2 = std(dist1), std(dist2)
+    println("Average distance O-Asp140: $avg_d1 ± $std_d1 Å")
+    println("Average distance Asp140-Asp94: $avg_d2 ± $std_d2 Å")
+    Plots.scatter!(
+        [avg_d1], [avg_d2],
+        label="média", color=:black, markersize=30, marker=:star
+    )
+    return Plots.current()
+end ### colocar 
+
 function rmsd(pdbname::String, trajectory::String; selection="all", mass=nothing, reference_frame=nothing, show_progress=false, first=1, last=nothing, step=1)
     simulation = MolSimToolkit.Simulation(pdbname, trajectory; first=first, last=last, step=step)
     return rmsd(simulation, selection=selection, mass=mass, reference_frame=reference_frame, show_progress=show_progress)
