@@ -133,3 +133,63 @@ function closest2fibril(simulation::MolSimToolkit.Simulation, segcode::String; s
     end
     return iresid, distances
 end
+
+function closest2fibril(files::Vector{String}, first::Int64, last::Int64)
+    distances = Vector{Matrix{Float64}}(undef, length(files))
+    for (iseg, file) in enumerate(files)
+        if filesize(file) == 0
+            continue
+        end
+        distances[iseg] = closest2fibril(file, first, last)
+    end
+    return distances
+end
+
+function closest2fibril(file::String, first::Int64, last::Int64)
+    data = readdlm(file)
+    nframes = minimum(data[:,1]):maximum(data[:,1])
+    distance = zeros(Float64, length(first:last), length(nframes))
+    for iframe in nframes
+        idx = findall((data[:,1] .== iframe) .& (first .<= data[:,2] .<= last))
+        distance[:, iframe] .= data[idx,7]
+    end
+    return distance
+end
+
+function closest2fibril(data1::Vector{Matrix{Float64}}, data2::Vector{Matrix{Float64}}; colors=["coral2", "skyblue2"])
+    # Plots.gr(size=(1000,800), dpi=900, fmt=:png)
+    # Plots.plot(
+    #     title="", legend=:topleft, xlabel="# backbone residue", ylabel="Minimum distances (Å)", fontfamily=:arial,
+    #     ## Axis configs
+    #     framestyle=:box, grid=true, minorgrid=true, minorticks=5, thick_direction=:out,
+    #     ## Font configs
+    #     titlefontsize=18, guidefontsize=16, tickfontsize=16, labelfontsize=18, legendfontsize=16, guidefonthalign=:center,
+    #     ## Margins
+    #     left_margin=5Plots.Measures.mm, right_margin=10Plots.Measures.mm, top_margin=10Plots.Measures.mm, bottom_margin=1Plots.Measures.mm
+    # )
+    data1 = hcat(data1...)
+    data2 = hcat(data2...)
+    average1, average2 = mean(data1, dims=2), mean(data2, dims=2)
+    #extrema1, extrema2 = extrema(data1, dims=2), extrema(data2, dims=2)
+    println("""
+    $(round(mean(average1), sigdigits=2)) ± $(round(std(average1), sigdigits=2)) Å
+    $(round(mean(average2), sigdigits=2)) ± $(round(std(average2), sigdigits=2)) Å
+    """)
+    # Plots.plot!(
+    #     average1,
+    #     #ribbon=(average1 - extrema1[1], extrema1[2] - average1),
+    #     #fillalpha=0.3,
+    #     color=colors[1],
+    #     linewidth=2,
+    #     label=label1
+    # )
+    # Plots.plot!(
+    #     average2,
+    #     #ribbon=(average2 - extrema2[1], extrema2[2] - average2),
+    #     #fillalpha=0.3,
+    #     color=colors[2],
+    #     linewidth=2,
+    #     label=label2
+    # )
+    # return Plots.current()
+end

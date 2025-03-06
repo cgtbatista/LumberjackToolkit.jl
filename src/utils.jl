@@ -565,7 +565,7 @@ end
 function molframes(sim::MolSimToolkit.Simulation)
     natoms = length(sim.atoms)
     nframes = length(sim.frame_range)
-    trajectory = [Vector{SVector{3, Float64}}(undef, nframes) for _ in 1:natoms]
+    trajectory = [ Vector{SVector{3, Float64}}(undef, nframes) for _ in 1:natoms ]
     for (iframe, frame) in enumerate(sim)        
         coords =  MolSimToolkit.positions(frame)
         for atom in 1:natoms
@@ -575,25 +575,25 @@ function molframes(sim::MolSimToolkit.Simulation)
     return trajectory
 end
 
-# function molframes(sim::MolSimToolkit.Simulation)
-#     natoms, nframes = length(sim.atoms), length(sim.frame_range)
-#     trajectory = [Vector{SVector{3, Float64}}(undef, nframes) for _ in 1:natoms]
-#     MolSimToolkit.first_frame!(sim)
-#     plast = deepcopy(
-#             MolSimToolkit.positions(MolSimToolkit.current_frame(sim))
-#         )
-#     for iframe in 2:length(sim)
-#         frame = MolSimToolkit.next_frame!(sim)
-#         p =  MolSimToolkit.positions(frame)
-#         uc = MolSimToolkit.unitcell(frame)
-#         for iatom in 1:natoms
-#             pat = MolSimToolkit.wrap(p[iatom], plast[iatom], uc)
-#             trajectory[iatom][iframe] = SVector{3, Float64}(pat...)
-#         end
-#         plast .= p
-#     end
-#     return trajectory
-# end
+function molframes2(sim::MolSimToolkit.Simulation)
+    natoms, nframes = length(sim.atoms), length(sim.frame_range)
+    trajectory = [Vector{SVector{3, Float64}}(undef, nframes) for _ in 1:natoms]
+    MolSimToolkit.first_frame!(sim)
+    plast = deepcopy(
+            MolSimToolkit.positions(MolSimToolkit.current_frame(sim))
+        )
+    for iframe in 2:length(sim)
+        frame = MolSimToolkit.next_frame!(sim)
+        p =  MolSimToolkit.positions(frame)
+        uc = MolSimToolkit.unitcell(frame)
+        for iatom in 1:natoms
+            pat = MolSimToolkit.wrap(p[iatom], plast[iatom], uc)
+            trajectory[iatom][iframe] = SVector{3, Float64}(pat...)
+        end
+        plast .= p
+    end
+    return trajectory
+end
 
 ### VMD
 
@@ -648,3 +648,8 @@ function searchsortednearest(vector, x)
         return abs(vector[idx] - x) < abs(vector[idx-1] - x) ? idx : idx - 1
     end
 end
+
+# density!(framestyle=:box, grid=true, minorgrid=true, minorticks=5)
+# density!(xlabel="Time (ns)", ylabel="Frequency")
+# density!(titlefontsize=18, guidefontsize=16, tickfontsize=16, labelfontsize=18, legendfontsize=16, guidefonthalign=:center)
+# density!(left_margin=5Plots.Measures.mm, right_margin=10Plots.Measures.mm, top_margin=10Plots.Measures.mm, bottom_margin=1Plots.Measures.mm)

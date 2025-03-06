@@ -1,4 +1,4 @@
-function diffusion(t, msd; dim=3, timestep=0.1)
+function diffusion(t, msd; dim=3, timestep=0.2)
     fit = EasyFit.fitlinear(timestep .* t, msd)
     D = fit.a * inv(2*dim)
     println("""

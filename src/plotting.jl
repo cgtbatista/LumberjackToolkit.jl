@@ -601,3 +601,70 @@ function fibril_slice(
     #Plots.savefig(output_filename)
     return Plots.current()
 end
+
+
+function density_profile(
+    bin1::Matrix{Float64}, bin2::Matrix{Float64}, densities::Array{Float64, 3};
+    frame=nothing, smoothing=false, bins=200, colors=:Greens,
+    xlabel="x-axis (Å)", ylabel="y-axis (Å)", xlims=nothing, ylims=nothing
+)
+    @assert size(bin1, 2) == size(bin2, 2) == size(densities, 3) "The number of frames should be the same."
+    xlims = !isnothing(xlims) ? (-xlims, xlims) : (minimum(bin1), maximum(bin1))
+    ylims = !isnothing(ylims) ? (-ylims, ylims) : (minimum(bin2), maximum(bin2))
+    if isnothing(frame)
+        edp_plotting_averages(
+            bin1, bin2, densities; smoothing=smoothing, bins=bins, colors=colors,
+            xlabel=xlabel, ylabel=ylabel, xlims=xlims, ylims=ylims
+        )
+    end
+    return Plots.current()
+end
+
+function edp_plotting_averages(
+    bin1, bin2, densities; smoothing=true, bins=200, colors=:Greens,
+    xlabel="x-axis (Å)", ylabel="y-axis (Å)", xlims=nothing, ylims=nothing
+)
+    nframes = size(densities, 3)
+    projx = smoothing ? zeros(Float64, bins) : zeros(Float64, size(bin1, 1))
+    projy = smoothing ? zeros(Float64, bins) : zeros(Float64, size(bin2, 1))
+    ρ_new = smoothing ? zeros(Float64, bins, bins) : zeros(Float64, size(densities, 1), size(densities, 2))
+    for iframe in 1:nframes
+        x, y, z = if smoothing
+                interpol(bin1[:,iframe], bin2[:,iframe], densities[:,:,iframe], bins=bins)
+            else
+                bin1[:,iframe], bin2[:,iframe], densities[:,:,iframe]
+        end
+        projx .+= x
+        projy .+= y
+        ρ_new .+= z
+    end
+    projx ./= nframes
+    projy ./= nframes
+    ρ_new ./= nframes
+    Plots.gr(size=(1000,800), dpi=900, fmt=:png)
+    Plots.heatmap(
+        projx, projy, ρ_new',
+        color=colors,
+        clims=(minimum(ρ_new), maximum(ρ_new)),
+        xlabel=xlabel, ylabel=ylabel, fontfamily=:arial,
+        ## Axis configs
+        xlims=xlims, ylims=ylims,
+        framestyle=:box,
+        grid=true,
+        minorgrid=true,
+        minorticks=5,
+        thick_direction=:out,
+        ## Font configs
+        titlefontsize=18,
+        guidefontsize=16,
+        tickfontsize=16,
+        labelfontsize=18,
+        legendfontsize=16,
+        guidefonthalign=:center,
+        ## Margins
+        left_margin=5Plots.Measures.mm,
+        right_margin=10Plots.Measures.mm,
+        top_margin=10Plots.Measures.mm,
+        bottom_margin=1Plots.Measures.mm
+    )
+end

@@ -283,3 +283,103 @@ end
 
 
 
+# function dimensionless_profile_2D(sim::MolSimToolkit.Simulation, Q::Vector{Float64}; axis="xz", cutoff=1.0, hascenter=true, hassymmetry=true)
+#     axescode = Dict{String, Function}([
+#         ["xy", "yx"] .=> () -> [1,2]; ["xz", "zx"] .=> () -> [1,3]; ["yz", "zy"] .=> () -> [2,3]
+#     ])
+#     if haskey(axescode, lowercase(axis))
+#         dims = axescode[axis]()
+#         V, bin1, bin2 = binning(sim, axis=axis, cutoff=cutoff)
+#         bins1 = Matrix{Float64}(undef, length(bin1)-1, length(sim))
+#         bins2 = Matrix{Float64}(undef, length(bin2)-1, length(sim))
+#         densities = Array{Float64, 3}(undef, length(bin1)-1, length(bin2)-1, length(sim))
+#     else
+#         throw(ArgumentError("The axis should be associated with the labels of cartesian axes."))
+#     end
+#     iatoms = PDBTools.index.(sim.atoms)
+#     for (iframe, frame) in enumerate(sim)
+#         coords = [ coord[dims] for coord in MolSimToolkit.positions(frame)[iatoms] ]
+#         for i in 1:length(bin1)-1, j in 1:length(bin2)-1
+#             idx = findall(
+#                 coord -> (bin1[i] <= coord[1] <= bin1[i+1]) && (bin2[j] <= coord[2] <= bin2[j+1]),
+#                 coords
+#             )
+#             densities[i,j,iframe] = !isempty(idx) ? V \ sum(Q[iatoms][idx]) : 0.0
+#         end
+#         if !hascenter
+#             bins1[:,iframe], bins2[:,iframe] = avgbins(bin1), avgbins(bin2)
+#         else
+#             avg = mean(coords)
+#             if hassymmetry
+#                 bins1[:,iframe] = _fix_binning_symmetry(bin1, avg[1])
+#                 bins2[:,iframe] = _fix_binning_symmetry(bin2, avg[2])
+#                 if !issorted(bins1[:,iframe]) || !issorted(bins2[:,iframe])
+#                     isorted, jsorted = sortperm(bins1[:,iframe]), sortperm(bins2[:,iframe])
+#                     bins1[:,iframe], bins2[:,iframe] = bins1[isorted,iframe], bins2[jsorted,iframe]
+#                     densities[:,:,iframe] = densities[isorted,jsorted,iframe]
+#                 end
+#             else
+#                 bins1[:,iframe] = _fix_binning_center(bin1, avg[1])
+#                 bins2[:,iframe] = _fix_binning_center(bin2, avg[2])
+#             end
+#         end
+#     end
+#     return bins1, bins2, densities
+# end
+
+# function gaussian_profile_2D(
+#     sim::MolSimToolkit.Simulation, Q::Vector{Float64};
+#     axis="xz", cutoff=1.0, resolution=0.5, σ=1.0, cs=nothing, hascenter=true, hassymmetry=true
+# )
+#     axescode = Dict{String, Function}([
+#         ["xy", "yx"] .=> () -> [1,2]; ["xz", "zx"] .=> () -> [1,3]; ["yz", "zy"] .=> () -> [2,3]
+#     ])
+#     if haskey(axescode, lowercase(axis))
+#         dims = axescode[axis]()
+#         V, bin1, bin2 = binning(sim, axis=axis, cutoff=cutoff)
+#         bins1 = Matrix{Float64}(undef, length(bin1)-1, length(sim))
+#         bins2 = Matrix{Float64}(undef, length(bin2)-1, length(sim))
+#         densities = zeros(Float64, length(bin1)-1, length(bin2)-1, length(sim))
+#     else
+#         throw(ArgumentError("The axis should be associated with the labels of cartesian axes."))
+#     end
+#     iatoms = PDBTools.index.(sim.atoms)
+#     for (iframe, frame) in enumerate(sim)
+#         coords = MolSimToolkit.positions(frame)[iatoms]
+#         σ = σ .* ones(Float64, length(iatoms))
+#         A = Q[iatoms] ./ (sqrt(2π) .* σ).^3
+#         α = inv.(-2σ .^ 2)
+#         ρ(r) = sum(
+#             A .* exp.(α .* [ sum((r .- coord).^2) for coord in coords ])
+#         )
+#         points = density_grid(coords, resolution)
+#         density = ρ.(points)
+#         ibin = [ searchsortedfirst(bin1, point[dims[1]]) for point in points ]
+#         jbin = [ searchsortedfirst(bin2, point[dims[2]]) for point in points ]
+#         @inbounds for p in 1:length(points)
+#             i, j = ibin[p], jbin[p]
+#             if 1 <= i <= size(densities, 1) && 1 <= j <= size(densities, 2)
+#                 densities[i, j, iframe] += density[p]
+#             end
+#         end
+#         densities[:,:,iframe] ./= V
+#         if !hascenter
+#             bins1[:,iframe], bins2[:,iframe] = avgbins(bin1), avgbins(bin2)
+#         else
+#             avg = mean([ coord[dims] for coord in coords ])
+#             if hassymmetry
+#                 bins1[:,iframe] = _fix_binning_symmetry(bin1, avg[1])
+#                 bins2[:,iframe] = _fix_binning_symmetry(bin2, avg[2])
+#                 if !issorted(bins1[:,iframe]) || !issorted(bins2[:,iframe])
+#                     isorted, jsorted = sortperm(bins1[:,iframe]), sortperm(bins2[:,iframe])
+#                     bins1[:,iframe], bins2[:,iframe] = bins1[isorted,iframe], bins2[jsorted,iframe]
+#                     densities[:,:,iframe] = densities[isorted,jsorted,iframe]
+#                 end
+#             else
+#                 bins1[:,iframe] = _fix_binning_center(bin1, avg[1])
+#                 bins2[:,iframe] = _fix_binning_center(bin2, avg[2])
+#             end
+#         end
+#     end
+#     return bins1, bins2, densities
+# end

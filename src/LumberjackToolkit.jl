@@ -45,7 +45,7 @@ export E_quasiharmonic, P_quasiharmonic, pmf_pca
 
 ##
 export simsteps, realtime
-export testfiles, coef_diffusion, msd, frame_coordinates, molindexes, writecoords, molframes
+export testfiles, diffusion, msd, frame_coordinates, molindexes, writecoords, molframes
 
 ## TEST!!
 export readcoords2, msd2, unwrap, dimcells, displace, originaldisplace
