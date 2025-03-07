@@ -4,8 +4,8 @@ import PDBTools
 import EasyFit
 import MolSimToolkit
 import StatsPlots, Plots
-
 import Interpolations
+
 import FFTW: rfft, irfft
 import MDLovoFit_jll: mdlovofit
 import DelimitedFiles: readdlm
@@ -13,7 +13,6 @@ import Printf: @sprintf, @printf
 import StaticArrays: @SVector, SVector, SMatrix, @SMatrix, MArray
 import Statistics: mean, median, std
 import LinearAlgebra: norm, dot, cross, diag, diagm, eigen, det
-
 import Base.Threads: @threads
 
 ## RMSD
@@ -82,6 +81,6 @@ include("./simulation.jl")
 include("./unwrap.jl")
 
 include("./dupree.jl")
-include("./closest2fibril.jl")
+include("./distances.jl")
 
 end
