@@ -115,6 +115,32 @@ function closest2fibril(
     return Plots.current()
 end
 
+function min_distances(
+    pdbname::String, trjname::String; selection1="not water", selection2="water",
+    first=1, last=nothing, step=1
+)
+    simulation = MolSimToolkit.Simulation(
+        pdbname, trjname; first=first, last=last, step=step
+    )
+    idx1 = PDBTools.index.(PDBTools.select(simulation.atoms, selection1))
+    idx2 = PDBTools.index.(PDBTools.select(simulation.atoms, selection2))
+    mindistances = zeros(Float64, length(simulation))
+    for (iframe, frame) in enumerate(simulation)
+        p1, p2 = MolSimToolkit.positions(frame)[idx1], MolSimToolkit.positions(frame)[idx2]
+        uc = MolSimToolkit.unitcell(frame)
+        d12 = +Inf
+        for x1 in p1, x2 in p2
+            x2_wrapped = MolSimToolkit.wrap(x2, x1, uc)
+            d12 = min(
+                d12,
+                norm(x2_wrapped .- x1)
+            )
+        end
+        mindistances[iframe] = d12
+    end
+    return mindistances
+end
+
 function catalytic_distances(
     pdbname::String, trjname::String; selection0="not water", selection1="water",
     first=1, last=nothing, step=1

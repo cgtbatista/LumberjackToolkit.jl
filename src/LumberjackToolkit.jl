@@ -12,12 +12,15 @@ import DelimitedFiles: readdlm
 import Printf: @sprintf, @printf
 import StaticArrays: @SVector, SVector, SMatrix, @SMatrix, MArray
 import Statistics: mean, median, std
+import StatsBase: Histogram, fit
 import LinearAlgebra: norm, dot, cross, diag, diagm, eigen, det
 import Base.Threads: @threads
 
+## distances -- compute the distances between two sets of atoms such as: cellulose-water, cellulose-hemicellulose, catalytic site, etc.
+export min_distances
+
 ## RMSD
 export rmsd_plot
-
 
 export avg_densityprofile
 
@@ -25,7 +28,8 @@ export CarbohydrateDihedrals
 export simulation_steps, dihedral_atoms, dihedral_indexes, dihedrals
 export get_pressure, get_energy
 
-export WHAM
+## PMF -- Potential of Mean Force
+export WHAM, pmf
 
 export pmf1D, pmf2D
 

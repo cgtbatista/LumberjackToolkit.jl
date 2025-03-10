@@ -55,3 +55,22 @@ function WHAM(coord::Vector{Float64}; bins=0.0:20.0:360.0, kB=1.9872041e-3, T=29
 
     return pmf
 end
+
+function pmf(x::Vector{Float64}, window::Float64; kB=1.9872041e-3, T=298.15, normalize=true)
+    hist = fit(
+        Histogram, x, minimum(x):window:maximum(x)
+    )
+    prob = hist.weights / sum(hist.weights)
+    bins = hist.edges[1][1:end-1] .+ 0.5*window
+    return collect(bins), pmf(prob, kB=kB, T=T, normalize=normalize)
+end
+
+function pmf(prob::Vector{Float64}; kB=1.9872041e-3, T=298.15, normalize=true)
+    β = inv(kB * T)
+    pmf = -β .\ log.(prob)
+    pmf = ifelse.(isinf.(pmf), NaN, pmf)
+    if normalize
+        pmf .-= minimum(pmf[.!isnan.(pmf)])
+    end
+    return pmf
+end
