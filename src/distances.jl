@@ -197,4 +197,133 @@ function catalytic_distances(dist1::Vector{Float64}, dist2::Vector{Float64})
         label="média", color=:black, markersize=30, marker=:star
     )
     return Plots.current()
-end ### colocar 
+end ### colocar
+
+function mapwater(
+    pdbname::String, trjname::String;
+    first=1, step=1, last=nothing,
+    selection="not water", water_selection="water",
+    without_hydrogens=true, cutoff=5.0
+)
+    simulation = MolSimToolkit.Simulation(pdbname, trjname, first=first, step=step, last=last)
+    return mapwater(
+        simulation,
+        selection = selection, water_selection = water_selection,
+        without_hydrogens = without_hydrogens,
+        cutoff = cutoff
+    )
+end
+
+function mapwater(
+    simulation::MolSimToolkit.Simulation;
+    selection="not water",                      # selection of the reference atoms -- it's the solute! It can be the carbohydrates, the ions, etc.
+    water_selection="water",                    # selection of the water molecules, ie. the solvent of the PCW matrix
+    without_hydrogens=true,                     # if the hydrogens should be removed from the analysis. Very useful to approach some experimental evidences.
+    cutoff=5.0                                  # the cutoff distance to consider the water molecule around the reference atoms
+)
+    reference = PDBTools.select(simulation.atoms, selection) 
+    monitored = PDBTools.select(simulation.atoms, water_selection)
+    if without_hydrogens
+        reference = PDBTools.select(reference, at -> PDBTools.element(at) != "H")
+        monitored = PDBTools.select(monitored, at -> PDBTools.element(at) != "H")
+        natoms = 1
+    else
+        natoms = 3
+    end
+    imonitored, jreference = PDBTools.index.(monitored), PDBTools.index.(reference)     
+    M = Matrix{Bool}(undef, length(imonitored), length(simulation.frame_range))
+    for (iframe, frame) in enumerate(simulation)
+        xyz, uc = MolSimToolkit.positions(frame), diag(MolSimToolkit.unitcell(frame))
+        mindistances = MolSimToolkit.minimum_distances(
+            xpositions = [ SVector(xyz[i]) for i in imonitored ],     # solvent - the monitored atoms around the reference (e.g. water)
+            ypositions = [ SVector(xyz[j]) for j in jreference ],     # solute  - the reference atoms (e.g. polymeric matrix)
+            xn_atoms_per_molecule = natoms,
+            cutoff = cutoff,
+            unitcell = uc
+        )
+        for (iwater, md) in enumerate(mindistances)
+           M[iwater, iframe] = md.within_cutoff
+        end
+    end
+    return BitMatrix(M)
+end
+
+function mapwater(M1::BitMatrix, M2::BitMatrix, operation::Int64)
+    M = M1 + M2
+    if operation in Set([0,1,2])
+        return ifelse.(M .== operation, true, false)
+    else
+        throw(ArgumentError("The operation must be 0 (complement), 1 (disjoint), or 2 (intersection)."))
+    end
+end
+
+function mapwater(files::Vector{String}; threshold=nothing)
+    t = Float64[]
+    for file in files
+        if filesize(file) == 0
+            continue
+        end
+        data = isnothing(threshold) ? readdlm(file)[:,1] : filter(>(threshold), readdlm(file)[:,1])
+        append!(t, Float64.(data))
+    end
+    Plots.gr(size=(1000,800), dpi=900, fmt=:png)
+    Plots.histogram(
+        t,
+        xlabel="residence time (ns)", ylabel="Frequency", bins=10,
+        title="", fontfamily=:arial, normalize=true, color=:skyblue2,
+        ## Axis configs
+        framestyle=:box,
+        grid=true,
+        minorgrid=true,
+        minorticks=5,
+        thick_direction=:out,
+        ## Font configs
+        titlefontsize=18,
+        guidefontsize=16,
+        tickfontsize=16,
+        labelfontsize=18,
+        legendfontsize=16,
+        guidefonthalign=:center,
+        ## Margins
+        left_margin=5Plots.Measures.mm,
+        right_margin=10Plots.Measures.mm,
+        top_margin=10Plots.Measures.mm,
+        bottom_margin=1Plots.Measures.mm
+    )
+    println("The average residence time is $(round(mean(t), sigdigits=2)) ± $(round(std(t), sigdigits=2)) ns")
+    return Plots.current()
+end
+
+function t_residence(M::BitMatrix; timestep=0.1)
+    t = Float64[]
+    sizehint!(t, size(M,1) * 10)
+    for row in eachrow(M)
+        trow = checking_residence(
+            BitVector(row)
+        )
+        append!(t, timestep .* trow)
+    end
+    return filter(!iszero, t)
+end
+
+function checking_residence(checklist::BitVector)
+    if iszero(sum(checklist))
+        return 0
+    end
+    counting = Int64[]
+    counter = 0
+    for present in checklist
+        if present
+            counter += 1
+        else
+            if counter > 0
+                push!(counting, counter)
+                counter = 0
+            end
+        end
+    end
+    if counter > 0
+        push!(counting, counter)
+    end
+    return counting
+end
