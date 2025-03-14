@@ -214,6 +214,74 @@ function mapwater(
     )
 end
 
+function hbondfinder(
+    simulation::MolSimToolkit.Simulation;
+    selection="not water",                                      # selection of the reference atoms -- it's the solute! It can be the carbohydrates, the ions, etc.
+    water_selection= at -> at.resname == "TIP3",                # selection of the water molecules, ie. the solvent of the PCW matrix
+    without_hydrogens=true,                                     # if the hydrogens should be removed from the analysis. Very useful to approach some experimental evidences.
+    cutoff=3.5, cutoff2=2.5, θ=30                               # the cutoff distance to consider the water molecule around the reference atoms
+)
+    if isnothing(cutoff) && isnothing(cutoff2) && isnothing(θ)
+        throw(ArgumentError("You must provide at least one of the cutoff distances or the angle."))
+    end # to be implemented
+    reference = PDBTools.select(simulation.atoms, selection) 
+    monitored = PDBTools.select(simulation.atoms, water_selection)
+    if without_hydrogens
+        reference = PDBTools.select(reference, at -> PDBTools.element(at) != "H")
+        monitored = PDBTools.select(monitored, at -> PDBTools.element(at) != "H")
+        natoms = 1
+    else
+        natoms = 3
+    end
+    imonitored, jreference = PDBTools.index.(monitored), PDBTools.index.(reference)
+    ### To implement H-bonding geometric criteria
+    resnum_data = PDBTools.resnum.(simulation.atoms)
+    M = Matrix{Bool}(undef, length(imonitored), length(simulation.frame_range))
+    for (iframe, frame) in enumerate(simulation)
+        xyz, uc = MolSimToolkit.positions(frame), diag(MolSimToolkit.unitcell(frame))
+        mindist = MolSimToolkit.minimum_distances(
+            xpositions = [ SVector(xyz[i]) for i in imonitored ],     # solvent - the monitored atoms around the reference (e.g. water)
+            ypositions = [ SVector(xyz[j]) for j in jreference ],     # solute  - the reference atoms (e.g. polymeric matrix)
+            xn_atoms_per_molecule = natoms,
+            cutoff = cutoff,
+            unitcell = uc
+        )
+        for (iwater, md) in enumerate(mindist)
+           if md.within_cutoff
+               M[iwater, iframe] = true
+           else
+               M[iwater, iframe] = false
+           end
+        end
+    end
+    return BitMatrix(M)
+end
+
+function hbond_geometric_criteria(
+    atoms::Vector{PDBTools.Atom}, xyz::Vector{SVector{3, Float64}}, uc::SVector{3, Float64},
+)
+    simulation = MolSimToolkit.Simulation(
+        pdbname, trjname; first=first, last=last, step=step
+    )
+    idx1 = PDBTools.index.(PDBTools.select(simulation.atoms, selection1))
+    idx2 = PDBTools.index.(PDBTools.select(simulation.atoms, selection2))
+    mindistances = zeros(Float64, length(simulation))
+    for (iframe, frame) in enumerate(simulation)
+        p1, p2 = MolSimToolkit.positions(frame)[idx1], MolSimToolkit.positions(frame)[idx2]
+        uc = MolSimToolkit.unitcell(frame)
+        d12 = +Inf
+        for x1 in p1, x2 in p2
+            x2_wrapped = MolSimToolkit.wrap(x2, x1, uc)
+            d12 = min(
+                d12,
+                norm(x2_wrapped .- x1)
+            )
+        end
+        mindistances[iframe] = d12
+    end
+    return mindistances
+end
+
 function mapwater(
     simulation::MolSimToolkit.Simulation;
     selection="not water",                      # selection of the reference atoms -- it's the solute! It can be the carbohydrates, the ions, etc.
@@ -257,32 +325,25 @@ function mapwater(M1::BitMatrix, M2::BitMatrix, operation::Int64)
     end
 end
 
-function mapwater(files::Vector{String}; threshold=nothing)
+function mapwater(files::Vector{String}; threshold=nothing, nbins=40)
     t = Float64[]
     for file in files
         if filesize(file) == 0
             continue
         end
         data = isnothing(threshold) ? readdlm(file)[:,1] : filter(>(threshold), readdlm(file)[:,1])
-        append!(t, Float64.(data))
+        append!(t, data)
     end
     Plots.gr(size=(1000,800), dpi=900, fmt=:png)
-    Plots.histogram(
-        t,
-        xlabel="residence time (ns)", ylabel="Frequency", bins=10,
-        title="", fontfamily=:arial, normalize=true, color=:skyblue2,
+    fitting = normalize(fit(Histogram, t, nbins=nbins), mode=:probability)
+    Plots.plot(fitting, bins=nbins, label="", normalize=true)
+    Plots.plot!(
+        xlabel="residence time (ns)", ylabel="Normalized frequency", title="", fontfamily=:arial, alfa=1.0, color=:skyblue2,
         ## Axis configs
-        framestyle=:box,
-        grid=true,
-        minorgrid=true,
-        minorticks=5,
-        thick_direction=:out,
+        xlims=extrema(t), ylims=(0.0, 1.0),
+        framestyle=:box, grid=true, minorgrid=true, minorticks=5, thick_direction=:out,
         ## Font configs
-        titlefontsize=18,
-        guidefontsize=16,
-        tickfontsize=16,
-        labelfontsize=18,
-        legendfontsize=16,
+        titlefontsize=20, guidefontsize=20, tickfontsize=18, labelfontsize=22, legendfontsize=16,
         guidefonthalign=:center,
         ## Margins
         left_margin=5Plots.Measures.mm,
@@ -290,8 +351,61 @@ function mapwater(files::Vector{String}; threshold=nothing)
         top_margin=10Plots.Measures.mm,
         bottom_margin=1Plots.Measures.mm
     )
-    println("The average residence time is $(round(mean(t), sigdigits=2)) ± $(round(std(t), sigdigits=2)) ns")
+    println("""
+    -------------------
+    Time histogram data
+    -------------------
+
+    The average time is $(round(mean(t), sigdigits=2)) ⨦ $(round(std(t), sigdigits=2)) ns.
+    The minimum time is $(round(minimum(t), sigdigits=2)) ns, and the maximum time is $(round(maximum(t), sigdigits=2)) ns.
+    
+    Filtering the values above 0.2 ns with average time of $(round(median(filter(>(0.2), t)), sigdigits=2)) ns.
+    t > 1.0 ns: $(round(100 * length(filter(>(1.0), t)) / length(filter(>(0.2), t)), sigdigits=2)) of the total.
+    t > 2.0 ns: $(round(100 * length(filter(>(2.0), t)) / length(filter(>(0.2), t)), sigdigits=2)) of the total.
+    t > 3.0 ns: $(round(100 * length(filter(>(3.0), t)) / length(filter(>(0.2), t)), sigdigits=2)) of the total.
+    """)
     return Plots.current()
+end
+
+function t_residence(t::Vector{Float64}; n=1)
+    times = unique(t)
+    prob = zeros(Float64, length(times))
+    for (i, time) in enumerate(times)
+        prob[i] = sum(t .== time) / length(t)
+    end
+    fit = EasyFit.fitexp(times, prob, n=n)
+    return fit.b, fit.R
+end
+
+function t_residence(files::Vector{String}, nbins::Int64; lower=nothing, upper=nothing, n=1)
+    t = Float64[]
+    for file in files
+        if filesize(file) == 0
+            continue
+        end
+        data = readdlm(file)[:,1]
+        if !isnothing(lower)
+            data = filter(>(lower), data)
+        end
+        if !isnothing(upper)
+            data = filter(<(upper), data)
+        end
+        append!(t, data)
+    end
+    #println(length(unique(t)))
+    nbins = iszero(nbins) ? length(unique(t)) : nbins
+    hist = fit(Histogram, t, nbins=nbins)
+    idx = findall(h -> !iszero(h), hist.weights)
+    prob = hist.weights[idx] / sum(hist.weights[idx])
+    tbin = (hist.edges[1][1:end-1] .+ hist.edges[1][2:end]) ./ 2
+    tbin = tbin[idx]
+    fitting = EasyFit.fitexp(tbin, prob, n=n)
+    return fitting.b, fitting.R
+end
+
+function t_residence(t, prob; n=1)
+    fit = EasyFit.fitexp(t, prob, n=n)
+    return fit.b, fit.R
 end
 
 function t_residence(M::BitMatrix; timestep=0.1)

@@ -13,7 +13,7 @@ import Printf: @sprintf, @printf
 import StaticArrays: @SVector, SVector, SMatrix, @SMatrix, MArray
 import Statistics: mean, median, std
 import StatsBase: Histogram, fit
-import LinearAlgebra: norm, dot, cross, diag, diagm, eigen, det
+import LinearAlgebra: norm, dot, cross, diag, diagm, eigen, det, normalize
 import Base.Threads: @threads
 
 ## distances -- compute the distances between two sets of atoms such as: cellulose-water, cellulose-hemicellulose, catalytic site, etc.
