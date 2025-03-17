@@ -464,6 +464,26 @@ function t_residence(M::BitMatrix; timestep=0.1)
     return filter(!iszero, t)
 end
 
+function residence(M::BitMatrix; step=1)
+    if step <= 0
+        throw(ArgumentError("step must be greater than 0"))
+    end
+    tmax = size(M, 2)
+    τ = timelag(tmax, step)
+    C = zeros(Float64, length(τ))
+    for (i, Δt) in enumerate(τ)
+        Σ, N = 0, 0
+        for waters in eachrow(M)
+            for t0 in 1:(tmax - Δt)
+                Σ += waters[t0] && waters[t0 + Δt]
+                N += waters[t0]
+            end
+        end
+        C[i] = iszero(N) ? 0.0 : inv(N) * Σ
+    end    
+    return τ, C
+end
+
 function checking_residence(checklist::BitVector)
     if iszero(sum(checklist))
         return 0

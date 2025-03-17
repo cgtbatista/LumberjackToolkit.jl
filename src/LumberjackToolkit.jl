@@ -54,7 +54,7 @@ export testfiles, diffusion, msd, frame_coordinates, molindexes, writecoords, mo
 export readcoords2, msd2, unwrap, dimcells, displace, originaldisplace
 export teste2, diameter_analysis, fibrilradii, chain_centers
 
-export mapwater, checking_residence, t_residence, closest2fibril, water_hbonding
+export mapwater, checking_residence, t_residence, closest2fibril, water_hbonding, residence
 
 ## dupree
 export cellulose_surface, filterSTL, fibrilwidth, fibril_surface, fibril_slice, catalytic_distances
