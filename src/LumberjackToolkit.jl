@@ -8,7 +8,7 @@ import Interpolations
 
 import FFTW: rfft, irfft
 import MDLovoFit_jll: mdlovofit
-import DelimitedFiles: readdlm
+import DelimitedFiles: readdlm, writedlm
 import Printf: @sprintf, @printf
 import StaticArrays: @SVector, SVector, SMatrix, @SMatrix, MArray
 import Statistics: mean, median, std
