@@ -253,7 +253,7 @@ function water_hbonding_parallel(
     imonitored, jreference = PDBTools.index.(monitored), PDBTools.index.(reference)
     M = Matrix{Bool}(undef, length(imonitored), length(simulation.frame_range))
     frames = [ frame for frame in simulation ]
-    BLAS.set_num_threads(1)
+    #BLAS.set_num_threads(1) each col will deal with one column
     @threads for iframe in eachindex(frames)
         frame = frames[iframe]
         xyz, uc = MolSimToolkit.positions(frame), diag(MolSimToolkit.unitcell(frame))        
