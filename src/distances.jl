@@ -222,6 +222,7 @@ function water_hbonding(
     imonitored, jreference = PDBTools.index.(monitored), PDBTools.index.(reference)
     M = Matrix{Bool}(undef, length(imonitored), length(simulation.frame_range))
     for (iframe, frame) in enumerate(simulation)
+        println(iframe)
         xyz, uc = MolSimToolkit.positions(frame), diag(MolSimToolkit.unitcell(frame))
         mindist = MolSimToolkit.minimum_distances(
             xpositions = [ SVector(xyz[i]) for i in imonitored ],     # solvent - the monitored atoms around the reference (e.g. water)
@@ -230,9 +231,8 @@ function water_hbonding(
             cutoff = OO,
             unitcell = uc
         )
-        println("")
-        for (iwater, md) in enumerate(mindist)
-            println(iwater)
+        @threads :static for iwater in eachindex(mindist)
+            md = mindist[iwater]
             M[iwater, iframe] = md.within_cutoff ? hbond_extended_geomcriteria(
                 simulation.atoms, xyz, uc=uc, i=md.i, j=md.j, HO=HO, HOO=HOO
             ) : false
