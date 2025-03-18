@@ -245,6 +245,40 @@ function water_hbonding(
     return BitMatrix(M)
 end
 
+function water_hbonding_parallel(
+    simulation::MolSimToolkit.Simulation;
+    selection="not water",                          
+    water="TIP3", OO=3.5, HO=2.5, HOO=30
+)
+    monitored = PDBTools.select(simulation.atoms, at -> at.resname == water && PDBTools.element(at) != "H")
+    reference = PDBTools.select(
+        PDBTools.select(simulation.atoms, selection),
+        at -> PDBTools.element(at) != "H"
+    )
+    imonitored, jreference = PDBTools.index.(monitored), PDBTools.index.(reference)
+    M = Matrix{Bool}(undef, length(imonitored), length(simulation.frame_range))
+    frames = [ frame for frame in simulation ]
+    # BLAS.set_num_threads(1)
+    @threads for iframe in eachindex(frames)
+        frame = frames[iframe]
+        xyz, uc = MolSimToolkit.positions(frame), diag(MolSimToolkit.unitcell(frame))        
+        mindist = MolSimToolkit.minimum_distances(
+            xpositions = [ SVector(xyz[i]) for i in imonitored ],
+            ypositions = [ SVector(xyz[j]) for j in jreference ],
+            xn_atoms_per_molecule = 1,
+            cutoff = OO,
+            unitcell = uc
+        )
+        for (iwater, md) in enumerate(mindist)
+            M[iwater, iframe] = md.within_cutoff ? hbond_extended_geomcriteria(
+                simulation.atoms, xyz, uc=uc, i=md.i, j=md.j, HO=HO, HOO=HOO
+            ) : false
+        end
+    end
+    
+    return BitMatrix(M)
+end
+
 function hbond_extended_geomcriteria(
     atoms::AbstractVector{<:PDBTools.Atom}, xyz::MolSimToolkit.FramePositions;
     uc=zeros(Float64, 3, 3), i=nothing, j=nothing, HO=2.5, HOO=30

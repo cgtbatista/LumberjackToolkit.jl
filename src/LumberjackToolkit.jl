@@ -13,8 +13,8 @@ import Printf: @sprintf, @printf
 import StaticArrays: @SVector, SVector, SMatrix, @SMatrix, MArray
 import Statistics: mean, median, std
 import StatsBase: Histogram, fit
-import LinearAlgebra: norm, dot, cross, diag, diagm, eigen, det, normalize
-import Base.Threads: @threads
+import LinearAlgebra: norm, dot, cross, diag, diagm, eigen, det, normalize, BLAS.set_num_threads
+import Base.Threads: @threads, nthreads
 
 ## distances -- compute the distances between two sets of atoms such as: cellulose-water, cellulose-hemicellulose, catalytic site, etc.
 export min_distances
@@ -54,7 +54,7 @@ export testfiles, diffusion, msd, frame_coordinates, molindexes, writecoords, mo
 export readcoords2, msd2, unwrap, dimcells, displace, originaldisplace
 export teste2, diameter_analysis, fibrilradii, chain_centers
 
-export mapwater, checking_residence, t_residence, closest2fibril, water_hbonding, residence
+export mapwater, checking_residence, t_residence, closest2fibril, water_hbonding, residence, water_hbonding_parallel
 
 ## dupree
 export cellulose_surface, filterSTL, fibrilwidth, fibril_surface, fibril_slice, catalytic_distances
