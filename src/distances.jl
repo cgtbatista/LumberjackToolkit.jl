@@ -232,14 +232,9 @@ function water_hbonding(
             unitcell = uc
         )
         for (iwater, md) in enumerate(mindist)
-           if md.within_cutoff
-               M[iwater, iframe] = hbond_extended_geomcriteria(
-                simulation.atoms, xyz,
-                uc=uc, i=md.i, j=md.j, HO=HO, HOO=HOO
-               )
-           else
-               M[iwater, iframe] = false
-           end
+            M[iwater, iframe] = md.within_cutoff ? hbond_extended_geomcriteria(
+                simulation.atoms, xyz, uc=uc, i=md.i, j=md.j, HO=HO, HOO=HOO
+            ) : false
         end
     end
     return BitMatrix(M)
@@ -258,7 +253,7 @@ function water_hbonding_parallel(
     imonitored, jreference = PDBTools.index.(monitored), PDBTools.index.(reference)
     M = Matrix{Bool}(undef, length(imonitored), length(simulation.frame_range))
     frames = [ frame for frame in simulation ]
-    # BLAS.set_num_threads(1)
+    BLAS.set_num_threads(1)
     @threads for iframe in eachindex(frames)
         frame = frames[iframe]
         xyz, uc = MolSimToolkit.positions(frame), diag(MolSimToolkit.unitcell(frame))        
