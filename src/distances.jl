@@ -336,9 +336,6 @@ end
     HD::SVector{3, Float64}, OA::SVector{3, Float64};
     cutoff=2.5, uc=nothing
 )
-    if isnothing(uc)
-        return norm(HD .- OA) <= cutoff
-    end
     return norm(MolSimToolkit.wrap(HD, OA, uc) .- OA) <= cutoff
 end
 
