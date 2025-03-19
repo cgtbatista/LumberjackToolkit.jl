@@ -231,21 +231,14 @@ function water_hbonding(
             cutoff = OO,
             unitcell = uc
         )
-        #ishbonded = findall(md -> md.within_cutoff, mindist)
-        counter = 1
-        ishbonded = Vector{Int64}(undef, length(imonitored))
-        for i in eachindex(mindist)
-            if mindist[i].within_cutoff
-                ishbonded[counter] = i
-                counter += 1
+        ishbonded = findall(md -> md.within_cutoff, mindist)
+        if !isempty(ishbonded)
+            @threads :static for iwater in ishbonded
+                md = mindist[iwater]
+                M[iwater, iframe] = hbond_extended_geomcriteria(
+                    simulation.atoms, xyz, uc=uc, i=md.i, j=md.j, HO=HO, HOO=HOO
+                )
             end
-        end
-        resize!(ishbonded, counter)
-        @threads :static for iwater in ishbonded
-            md = mindist[iwater]
-            M[iwater, iframe] = hbond_extended_geomcriteria(
-                simulation.atoms, xyz, uc=uc, i=md.i, j=md.j, HO=HO, HOO=HOO
-            )
         end
     end
     return BitMatrix(M)
@@ -285,7 +278,7 @@ function water_hbonding_parallel(
     return BitMatrix(M)
 end
 
-function hbond_extended_geomcriteria(
+@inline function hbond_extended_geomcriteria(
     atoms::AbstractVector{<:PDBTools.Atom}, xyz::MolSimToolkit.FramePositions;
     uc=zeros(Float64, 3, 3), i=nothing, j=nothing, HO=2.5, HOO=30
 )
@@ -321,7 +314,7 @@ function hbond_extended_geomcriteria(
     return false
 end
 
-function hbond_angle_checking(
+@inline function hbond_angle_checking(
     HD::SVector{3, Float64}, OD::SVector{3, Float64}, OA::SVector{3, Float64};
     cutoff=30.0, uc=zeros(Float64, 3, 3)
 )
@@ -336,19 +329,17 @@ function hbond_angle_checking(
         dot(v1, v2) / (norm(v1) * norm(v2)),
         -1.0, 1.0    
     )
-    return acosd(ratio) < cutoff
+    return acosd(ratio) <= cutoff
 end
 
-function hbond_bond2_checking(
+@inline function hbond_bond2_checking(
     HD::SVector{3, Float64}, OA::SVector{3, Float64};
-    cutoff=2.5, uc=zeros(Float64, 3, 3)
+    cutoff=2.5, uc=nothing
 )
-    HD = if uc == zeros(Float64, 3, 3)
-            HD
-        else
-            MolSimToolkit.wrap(HD, OA, uc)
+    if isnothing(uc)
+        return norm(HD .- OA) <= cutoff
     end
-    return norm(HD .- OA) < cutoff
+    return norm(MolSimToolkit.wrap(HD, OA, uc) .- OA) <= cutoff
 end
 
 function mapwater(
