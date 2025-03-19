@@ -210,9 +210,43 @@ function water_hbonding(
     )
 end
 
+# function water_hbonding(
+#     simulation::MolSimToolkit.Simulation;
+#     selection="not water", water="TIP3", OO=3.5, HO=2.5, HOO=30.0
+# )
+#     monitored = PDBTools.select(simulation.atoms, at -> at.resname == water && PDBTools.element(at) != "H")
+#     reference = PDBTools.select(
+#         PDBTools.select(simulation.atoms, selection),
+#         at -> PDBTools.element(at) != "H"
+#     )
+#     imonitored, jreference = PDBTools.index.(monitored), PDBTools.index.(reference)
+#     M = falses(length(imonitored), length(simulation.frame_range))
+#     for (iframe, frame) in enumerate(simulation)
+#         println(iframe)
+#         xyz, uc = MolSimToolkit.positions(frame), diag(MolSimToolkit.unitcell(frame))
+#         mindist = MolSimToolkit.minimum_distances(
+#             xpositions = [ SVector(xyz[i]) for i in imonitored ],     # solvent - the monitored atoms around the reference (e.g. water)
+#             ypositions = [ SVector(xyz[j]) for j in jreference ],     # solute  - the reference atoms (e.g. polymeric matrix)
+#             xn_atoms_per_molecule = 1,
+#             cutoff = OO,
+#             unitcell = uc
+#         )
+#         ishbonded = findall(md -> md.within_cutoff, mindist)
+#         if !isempty(ishbonded)
+#             @threads :static for iwater in ishbonded
+#                 md = mindist[iwater]
+#                 M[iwater, iframe] = hbond_extended_geomcriteria(
+#                     simulation.atoms, xyz, uc=uc, i=md.i, j=md.j, HO=HO, HOO=HOO
+#                 )
+#             end
+#         end
+#     end
+#     return BitMatrix(M)
+# end
+
 function water_hbonding(
     simulation::MolSimToolkit.Simulation;
-    selection="not water", water="TIP3", OO=3.5, HO=2.5, HOO=30
+    selection="not water", water="TIP3", OO=3.5, HO=2.5, HOO=30.0
 )
     monitored = PDBTools.select(simulation.atoms, at -> at.resname == water && PDBTools.element(at) != "H")
     reference = PDBTools.select(
@@ -220,10 +254,21 @@ function water_hbonding(
         at -> PDBTools.element(at) != "H"
     )
     imonitored, jreference = PDBTools.index.(monitored), PDBTools.index.(reference)
+    water_hydrogens = Dict{Int32,Vector{Int32}}()
+    for idx in imonitored
+        water_hydrogens[idx] = Int32[idx+1, idx+2]
+    end
     M = falses(length(imonitored), length(simulation.frame_range))
+    xyz_matrix = [Matrix{Float32}(undef, length(simulation.atoms), 3) for _ in 1:Threads.nthreads()]
     for (iframe, frame) in enumerate(simulation)
         println(iframe)
         xyz, uc = MolSimToolkit.positions(frame), diag(MolSimToolkit.unitcell(frame))
+        tid = threadid()
+        for i in eachindex(xyz)
+            xyz_matrix[tid][i, 1] = xyz[i][1]
+            xyz_matrix[tid][i, 2] = xyz[i][2]
+            xyz_matrix[tid][i, 3] = xyz[i][3]
+        end
         mindist = MolSimToolkit.minimum_distances(
             xpositions = [ SVector(xyz[i]) for i in imonitored ],     # solvent - the monitored atoms around the reference (e.g. water)
             ypositions = [ SVector(xyz[j]) for j in jreference ],     # solute  - the reference atoms (e.g. polymeric matrix)
@@ -232,16 +277,89 @@ function water_hbonding(
             unitcell = uc
         )
         ishbonded = findall(md -> md.within_cutoff, mindist)
-        if !isempty(ishbonded)
-            @threads :static for iwater in ishbonded
-                md = mindist[iwater]
-                M[iwater, iframe] = hbond_extended_geomcriteria(
-                    simulation.atoms, xyz, uc=uc, i=md.i, j=md.j, HO=HO, HOO=HOO
-                )
+        if isempty(ishbonded)
+            continue
+        end
+        @inbounds Threads.@threads :static for k in eachindex(ishbonded)
+            iwater = ishbonded[k]
+            md = mindist[iwater]
+            i, j = md.i, md.j  # water / sugar
+            ## WATER AS DONOR
+            h_donor = water_hydrogens[i]
+            isdonor = false
+            @fastmath for h_idx in h_donor
+                # criteria 2: H-O distance
+                dx = xyz_matrix[tid][h_idx,1] - xyz_matrix[tid][j,1]
+                dy = xyz_matrix[tid][h_idx,2] - xyz_matrix[tid][j,2]
+                dz = xyz_matrix[tid][h_idx,3] - xyz_matrix[tid][j,3]
+                dist_HO = sqrt(dx*dx + dy*dy + dz*dz)
+                # criteria 3: H-O...O angle
+                dx_OO = xyz_matrix[tid][j,1] - xyz_matrix[tid][i,1]
+                dy_OO = xyz_matrix[tid][j,2] - xyz_matrix[tid][i,2]
+                dz_OO = xyz_matrix[tid][j,3] - xyz_matrix[tid][i,3]
+                dot_prod = dx*dx_OO + dy*dy_OO + dz*dz_OO
+                angle = acos(dot_prod / (dist_HO * sqrt(dx_OO^2 + dy_OO^2 + dz_OO^2))) * 180/π
+                if dist_HO ≤ HO && angle ≥ HOO
+                    isdonor = true
+                    break
+                end
             end
+            M[iwater, iframe] = isdonor
         end
     end
     return BitMatrix(M)
+end
+
+@inline function hbond_extended_geomcriteria(
+    atoms::AbstractVector{<:PDBTools.Atom}, xyz::MolSimToolkit.FramePositions;
+    uc=zeros(Float64, 3, 3), i=nothing, j=nothing, HO=2.5, HOO=30
+)
+    if isnothing(HO) || isnothing(HOO)
+        return true
+    end
+    ## checking water as donor...
+    OA = xyz[j]
+    OD = MolSimToolkit.wrap(xyz[i], OA, uc)
+    hydrogens = PDBTools.index.(PDBTools.select(atoms, at -> at.resnum == atoms[i].resnum && PDBTools.element(at) == "H"))
+    isdonor = false
+    for idx in hydrogens
+        HD = MolSimToolkit.wrap(xyz[idx], OA, uc)
+        if hbond_angle_checking(HD, OD, OA, HOO) && hbond_bond2_checking(HD, OA, HO)
+            isdonor = true
+            break
+        end
+    end
+    ## checking water as acceptor...
+    OA = xyz[i]
+    OD = MolSimToolkit.wrap(xyz[j], OA, uc)
+    hydrogens = PDBTools.index.(PDBTools.select(atoms, at -> at.resnum == atoms[j].resnum && at.name == string("H", atoms[j].name)))
+    if length(hydrogens) == 0
+        isacepptor = false
+    else
+        HD = MolSimToolkit.wrap(xyz[hydrogens[1]], OA, uc)
+        isacepptor = hbond_angle_checking(HD, OD, OA, HOO) && hbond_bond2_checking(HD, OA, HO)
+    end
+    if isdonor || isacepptor
+        return true
+    end
+    return false
+end
+
+@inline function hbond_bond2_checking(HD::MolSimToolkit.Point3D, OA::MolSimToolkit.Point3D, cutoff::Float64)
+    v1 = HD .- OA
+    return norm(v1) <= cutoff
+end
+
+@inline function hbond_angle_checking(HD::MolSimToolkit.Point3D, OD::MolSimToolkit.Point3D, OA::MolSimToolkit.Point3D, cutoff::Float64)
+    v1 = HD .- OD
+    v2 = OA .- OD
+    return prodvector_angle(v1, v2) <= cutoff
+end
+
+@inline function prodvector_angle(v1::MolSimToolkit.Point3D, v2::MolSimToolkit.Point3D)
+    ratio = dot(v1, v2) / (norm(v1) * norm(v2))
+    ratio = clamp(ratio, -1.0, 1.0)
+    return π \ 180 * acos(ratio)
 end
 
 function water_hbonding_parallel(
@@ -276,67 +394,6 @@ function water_hbonding_parallel(
     end
     
     return BitMatrix(M)
-end
-
-@inline function hbond_extended_geomcriteria(
-    atoms::AbstractVector{<:PDBTools.Atom}, xyz::MolSimToolkit.FramePositions;
-    uc=zeros(Float64, 3, 3), i=nothing, j=nothing, HO=2.5, HOO=30
-)
-    if isnothing(HO) || isnothing(HOO)
-        return true
-    end
-    ## checking water as donor...
-    OA = SVector(xyz[j])
-    OD = SVector(xyz[i])
-    hydrogens = PDBTools.index.(PDBTools.select(atoms, at -> at.resnum == atoms[i].resnum && PDBTools.element(at) == "H"))
-    isdonor = false
-    for idx in hydrogens
-        HD = SVector(xyz[idx])
-        if hbond_angle_checking(HD, OD, OA, cutoff=HOO, uc=uc) && hbond_bond2_checking(HD, OA, cutoff=HO, uc=uc)
-            isdonor = true
-            break
-        end
-    end
-    ## checking water as acceptor...
-    OA = SVector(xyz[i])
-    OD = SVector(xyz[j])
-    hydrogens = PDBTools.index.(PDBTools.select(atoms, at -> at.resnum == atoms[j].resnum && at.name == string("H", atoms[j].name)))
-    if length(hydrogens) == 0
-        isacepptor = false
-    else
-        idx = hydrogens[1]
-        HD = SVector(xyz[idx])
-        isacepptor = hbond_angle_checking(HD, OD, OA, cutoff=HOO, uc=uc) && hbond_bond2_checking(HD, OA, cutoff=HO, uc=uc)
-    end
-    if isdonor || isacepptor
-        return true
-    end
-    return false
-end
-
-@inline function hbond_angle_checking(
-    HD::SVector{3, Float64}, OD::SVector{3, Float64}, OA::SVector{3, Float64};
-    cutoff=30.0, uc=zeros(Float64, 3, 3)
-)
-    HD, OD = if uc == zeros(Float64, 3, 3)
-            HD, OD
-        else
-            MolSimToolkit.wrap(HD, OA, uc), MolSimToolkit.wrap(OD, OA, uc)
-    end
-    v1 = HD .- OD
-    v2 = OA .- OD
-    ratio = clamp(
-        dot(v1, v2) / (norm(v1) * norm(v2)),
-        -1.0, 1.0    
-    )
-    return acosd(ratio) <= cutoff
-end
-
-@inline function hbond_bond2_checking(
-    HD::SVector{3, Float64}, OA::SVector{3, Float64};
-    cutoff=2.5, uc=nothing
-)
-    return norm(MolSimToolkit.wrap(HD, OA, uc) .- OA) <= cutoff
 end
 
 function mapwater(

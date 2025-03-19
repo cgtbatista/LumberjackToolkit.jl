@@ -14,7 +14,7 @@ import StaticArrays: @SVector, SVector, SMatrix, @SMatrix, MArray
 import Statistics: mean, median, std
 import StatsBase: Histogram, fit
 import LinearAlgebra: norm, dot, cross, diag, diagm, eigen, det, normalize, BLAS.set_num_threads
-import Base.Threads: @threads, nthreads
+import Base.Threads: @threads, nthreads, threadid
 
 ## distances -- compute the distances between two sets of atoms such as: cellulose-water, cellulose-hemicellulose, catalytic site, etc.
 export min_distances
