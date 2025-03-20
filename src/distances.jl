@@ -244,6 +244,65 @@ end
 #     return BitMatrix(M)
 # end
 
+# function water_hbonding(
+#     simulation::MolSimToolkit.Simulation; selection="not water", water="TIP3", rOO=3.5, rHO=2.5, α=30.0
+# )
+#     monitored = PDBTools.select(simulation.atoms, at -> at.resname == water && PDBTools.element(at) != "H")
+#     reference = PDBTools.select(
+#         PDBTools.select(simulation.atoms, selection),
+#         at -> PDBTools.element(at) != "H"
+#     )
+#     imonitored, jreference = PDBTools.index.(monitored), PDBTools.index.(reference)
+#     monitored_hydrogens = filtering_water_hydrogens(simulation.atoms, imonitored, water)
+#     reference_hydrogens = filtering_sugar_hydrogens(simulation.atoms, jreference, water)
+#     M = falses(length(imonitored), length(simulation.frame_range))
+#     XYZ = [Matrix{Float32}(undef, length(simulation.atoms), 3) for _ in 1:Threads.nthreads()]
+#     for (iframe, frame) in enumerate(simulation)
+#         xyz, uc = MolSimToolkit.positions(frame), diag(MolSimToolkit.unitcell(frame))
+#         mindist = MolSimToolkit.minimum_distances(
+#             xpositions = [ SVector(xyz[i]) for i in imonitored ],     # solvent - the monitored atoms around the reference (e.g. water)
+#             ypositions = [ SVector(xyz[j]) for j in jreference ],     # solute  - the reference atoms (e.g. polymeric matrix)
+#             xn_atoms_per_molecule = 1,
+#             cutoff = rOO,
+#             unitcell = uc
+#         )
+#         candidates = findall(md -> md.within_cutoff, mindist)
+#         if isempty(candidates)
+#             continue
+#         end
+#         tid = threadid()
+#         for i in eachindex(xyz)
+#             XYZ[tid][i, 1] = xyz[i][1]
+#             XYZ[tid][i, 2] = xyz[i][2]
+#             XYZ[tid][i, 3] = xyz[i][3]
+#         end
+#         @inbounds @threads :static for k in eachindex(candidates)
+#             iwater = candidates[k]
+#             i, j = imonitored[mindist[iwater].i], jreference[mindist[iwater].j]
+#             if haskey(monitored_hydrogens, i)           ## taking water as h-bond donor
+#                 oa = XYZ[tid][j,:] 
+#                 od = MolSimToolkit.wrap(XYZ[tid][i,:], oa, uc)
+#                 @fastmath for hydrogen in monitored_hydrogens[i]
+#                     hd = MolSimToolkit.wrap(XYZ[tid][hydrogen,:], oa, uc)
+#                     M[iwater, iframe] = hbond_bond2_checking(hd, oa, rHO) && hbond_angle_checking(hd, od, oa, α)
+#                     if M[iwater, iframe]
+#                         break
+#                     end
+#                 end
+#             end
+#             if M[iwater, iframe]
+#                 continue
+#             end
+#             if haskey(reference_hydrogens, j)           ## taking water as h-bond acceptor
+#                 hydrogen = reference_hydrogens[j]
+#                 hd = MolSimToolkit.wrap(XYZ[tid][hydrogen,:], oa, uc)
+#                 M[iwater, iframe] = hbond_bond2_checking(hd, od, rHO) && hbond_angle_checking(hd, oa, od, α)
+#             end
+#         end
+#     end
+#     return BitMatrix(M)
+# end
+
 function water_hbonding(
     simulation::MolSimToolkit.Simulation; selection="not water", water="TIP3", rOO=3.5, rHO=2.5, α=30.0
 )
@@ -256,46 +315,41 @@ function water_hbonding(
     monitored_hydrogens = filtering_water_hydrogens(simulation.atoms, imonitored, water)
     reference_hydrogens = filtering_sugar_hydrogens(simulation.atoms, jreference, water)
     M = falses(length(imonitored), length(simulation.frame_range))
-    XYZ = [Matrix{Float32}(undef, length(simulation.atoms), 3) for _ in 1:Threads.nthreads()]
+    xyz_buffer = Matrix{Float32}(undef, length(simulation.atoms), 3)
     for (iframe, frame) in enumerate(simulation)
         xyz, uc = MolSimToolkit.positions(frame), diag(MolSimToolkit.unitcell(frame))
+        @inbounds for i in eachindex(xyz)
+            xyz_buffer[i, 1] = xyz[i][1]
+            xyz_buffer[i, 2] = xyz[i][2]
+            xyz_buffer[i, 3] = xyz[i][3]
+        end
         mindist = MolSimToolkit.minimum_distances(
-            xpositions = [ SVector(xyz[i]) for i in imonitored ],     # solvent - the monitored atoms around the reference (e.g. water)
-            ypositions = [ SVector(xyz[j]) for j in jreference ],     # solute  - the reference atoms (e.g. polymeric matrix)
+            xpositions = [ SVector(xyz[i]) for i in imonitored ],  # Generator (sem alocação)
+            ypositions = [ SVector(xyz[j]) for j in jreference ], 
             xn_atoms_per_molecule = 1,
             cutoff = rOO,
             unitcell = uc
         )
         candidates = findall(md -> md.within_cutoff, mindist)
-        if isempty(candidates)
-            continue
-        end
-        tid = threadid()
-        for i in eachindex(xyz)
-            XYZ[tid][i, 1] = xyz[i][1]
-            XYZ[tid][i, 2] = xyz[i][2]
-            XYZ[tid][i, 3] = xyz[i][3]
-        end
-        @inbounds Threads.@threads :static for k in eachindex(candidates)
+        isempty(candidates) && continue
+        @inbounds @threads :static for k in eachindex(candidates)
             iwater = candidates[k]
             i, j = imonitored[mindist[iwater].i], jreference[mindist[iwater].j]
-            if haskey(monitored_hydrogens, i)           ## taking water as h-bond donor
-                oa = XYZ[tid][j,:] 
-                od = MolSimToolkit.wrap(XYZ[tid][i,:], oa, uc)
-                @fastmath for hydrogen in monitored_hydrogens[i]
-                    hd = MolSimToolkit.wrap(XYZ[tid][hydrogen,:], oa, uc)
-                    M[iwater, iframe] = hbond_bond2_checking(hd, oa, rHO) && hbond_angle_checking(hd, od, oa, α)
-                    if M[iwater, iframe]
-                        break
-                    end
+            oa = @view xyz_buffer[j, :] 
+            od = MolSimToolkit.wrap(@view(xyz_buffer[i, :]), oa, uc)
+            if haskey(monitored_hydrogens, i)   ## water as h-bond donor
+                hbond_found = false
+                for hydrogen in monitored_hydrogens[i]
+                    hd = MolSimToolkit.wrap(@view(xyz_buffer[hydrogen, :]), oa, uc)
+                    hbond_found = hbond_bond2_checking(hd, oa, rHO) && hbond_angle_checking(hd, od, oa, α)
+                    hbond_found && break
                 end
+                M[iwater, iframe] = hbond_found
+                hbond_found && continue
             end
-            if M[iwater, iframe]
-                continue
-            end
-            if haskey(reference_hydrogens, j)           ## taking water as h-bond acceptor
+            if haskey(reference_hydrogens, j)   ## water as h-bond acceptor
                 hydrogen = reference_hydrogens[j]
-                hd = MolSimToolkit.wrap(XYZ[tid][hydrogen,:], oa, uc)
+                hd = MolSimToolkit.wrap(@view(xyz_buffer[hydrogen, :]), od, uc)
                 M[iwater, iframe] = hbond_bond2_checking(hd, od, rHO) && hbond_angle_checking(hd, oa, od, α)
             end
         end
@@ -578,13 +632,14 @@ function residence(M::BitMatrix; step=1)
         throw(ArgumentError("step must be greater than 0"))
     end
     tmax = size(M, 2)
-    τ = timelag(tmax, step)
-    C = zeros(Float64, length(τ))
-    @threads for i in eachindex(τ)
+    τ, C = timelag(tmax, step), zeros(Float64, length(τ))
+    Σi, Ni = zeros(Int64, nthreads()), zeros(Int64, nthreads())
+    @threads :static for i in eachindex(τ)
+        tid = threadid()
         Δt = τ[i]
         Σ, N = 0, 0
         @inbounds for water in eachrow(M)
-            Σi, Ni = 0, 0
+            Σi[tid], Ni[tid] = 0, 0
             @simd for t0 in 1:(tmax - Δt)
                 Σi += water[t0] & water[t0 + Δt]
                 Ni += water[t0]
