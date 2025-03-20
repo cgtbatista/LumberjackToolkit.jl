@@ -580,7 +580,8 @@ function residence(M::BitMatrix; step=1)
     tmax = size(M, 2)
     τ = timelag(tmax, step)
     C = zeros(Float64, length(τ))
-    @threads :static for (i, Δt) in enumerate(τ)
+    @threads for i in eachindex(τ)
+        Δt = τ[i]
         Σ, N = 0, 0
         @inbounds for water in eachrow(M)
             Σi, Ni = 0, 0
