@@ -324,7 +324,7 @@ function water_hbonding(
             xyz_buffer[i, 3] = xyz[i][3]
         end
         mindist = MolSimToolkit.minimum_distances(
-            xpositions = [ SVector(xyz[i]) for i in imonitored ],  # Generator (sem alocação)
+            xpositions = [ SVector(xyz[i]) for i in imonitored ],
             ypositions = [ SVector(xyz[j]) for j in jreference ], 
             xn_atoms_per_molecule = 1,
             cutoff = rOO,
@@ -632,7 +632,8 @@ function residence(M::BitMatrix; step=1)
         throw(ArgumentError("step must be greater than 0"))
     end
     tmax = size(M, 2)
-    τ, C = timelag(tmax, step), zeros(Float64, length(τ))
+    τ = timelag(tmax, step)
+    C = zeros(Float64, length(τ))
     Σi, Ni = zeros(Int64, nthreads()), zeros(Int64, nthreads())
     @threads :static for i in eachindex(τ)
         tid = threadid()
