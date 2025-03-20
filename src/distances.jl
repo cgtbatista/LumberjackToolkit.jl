@@ -584,7 +584,7 @@ function residence(M::BitMatrix; step=1)
         Σ, N = 0, 0
         @inbounds for water in eachrow(M)
             Σi, Ni = 0, 0
-            for t0 in 1:(tmax - Δt)
+            @simd for t0 in 1:(tmax - Δt)
                 Σi += water[t0] & water[t0 + Δt]
                 Ni += water[t0]
             end
