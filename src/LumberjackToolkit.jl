@@ -11,7 +11,7 @@ import MDLovoFit_jll: mdlovofit
 import DelimitedFiles: readdlm, writedlm
 import Printf: @sprintf, @printf
 import StaticArrays: @SVector, SVector, SMatrix, @SMatrix, MArray
-import Statistics: mean, median, std
+import Statistics: mean, median, std, var
 import StatsBase: Histogram, fit
 import LinearAlgebra: norm, dot, cross, diag, diagm, eigen, det, normalize, BLAS.set_num_threads
 import Base.Threads: @threads, nthreads, threadid

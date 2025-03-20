@@ -580,25 +580,69 @@ function residence(M::BitMatrix; step=1)
     tmax = size(M, 2)
     τ = timelag(tmax, step)
     C = zeros(Float64, length(τ))
-    for (i, Δt) in enumerate(τ)
+    @threads :static for (i, Δt) in enumerate(τ)
         Σ, N = 0, 0
-        for waters in eachrow(M)
+        @inbounds for water in eachrow(M)
+            Σi, Ni = 0, 0
             for t0 in 1:(tmax - Δt)
-                Σ += waters[t0] && waters[t0 + Δt]
-                N += waters[t0]
+                Σi += water[t0] & water[t0 + Δt]
+                Ni += water[t0]
             end
+            Σ += Σi
+            N += Ni
         end
         C[i] = iszero(N) ? 0.0 : inv(N) * Σ
     end    
     return τ, C
 end
 
+# function residence(M::BitMatrix; step=1)
+#     if step <= 0
+#         throw(ArgumentError("step must be greater than 0"))
+#     end
+#     tmax = size(M, 2)
+#     τ = timelag(tmax, step)
+#     C = zeros(Float64, length(τ))
+#     for (i, Δt) in enumerate(τ)
+#         Σ, N = 0, 0
+#         for waters in eachrow(M)
+#             for t0 in 1:(tmax - Δt)
+#                 Σ += waters[t0] && waters[t0 + Δt]
+#                 N += waters[t0]
+#             end
+#         end
+#         C[i] = iszero(N) ? 0.0 : inv(N) * Σ
+#     end    
+#     return τ, C
+# end
+
 function residence(M::BitMatrix, timestep::Float64; step=1, n=1)    
     τ, C = residence(M, step=step)
-    fitting = EasyFit.fitexp(timestep .* τ, C, n=n)
-    return fitting.b, fitting.R
+    model = EasyFit.fitexp(timestep .* τ, C, n=n)
+    return model
 end
 
+function residence(file::String, timestep::Float64; step=1)
+    M = BitMatrix(readdlm(file, Int64) .== 1)
+    τ, C = residence(M, step=step)
+    return timestep .* τ, C
+end
+
+function residence(time::Vector{Float64}, correlation::Vector{Float64}; n=1)
+    fit = EasyFit.fitexp(time, correlation, n=n)
+    return fit
+end
+
+function residence(files::Vector{String}, timestep::Float64; step=1, n=1)
+    models = Vector{EasyFit.SingleExponential{Float64}}(undef, length(files))
+    for (i, file) in enumerate(files)
+        if filesize(file) == 0
+            continue
+        end
+        models[i] = residence(file, timestep, step=step, n=n)
+    end
+    return models
+end
 
 function checking_residence(checklist::BitVector)
     if iszero(sum(checklist))
