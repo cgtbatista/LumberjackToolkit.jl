@@ -584,6 +584,50 @@ function t_residence(t::Vector{Float64}; n=1)
     return fit.b, fit.R
 end
 
+
+function t_residence(files::Vector{String}; threshold=nothing, nbins=40)
+    t = Float64[]
+    for file in files
+        if filesize(file) == 0
+            continue
+        end
+        data = isnothing(threshold) ? readdlm(file)[:,1] : filter(>(threshold), readdlm(file)[:,1])
+        append!(t, data)
+    end
+    Plots.gr(size=(1000,800), dpi=900, fmt=:png)
+    fitting = normalize(fit(Histogram, t, nbins=nbins), mode=:probability)
+    Plots.plot(fitting, bins=nbins, label="xylan", normalize=true, color="coral2")
+    Plots.plot!(
+        xlabel="interstitial time (ns)", ylabel="Frequency", title="", fontfamily=:arial, alfa=1.0,
+        ## Axis configs
+        xlims=(0.0, 20.0), ylims=(0.0, 1.0),
+        framestyle=:box, grid=true, minorgrid=true, minorticks=5, thick_direction=:out,
+        ## Font configs
+        titlefontsize=20, guidefontsize=20, tickfontsize=18, labelfontsize=22, legendfontsize=16,
+        guidefonthalign=:center,
+        ## Margins
+        left_margin=5Plots.Measures.mm,
+        right_margin=10Plots.Measures.mm,
+        top_margin=10Plots.Measures.mm,
+        bottom_margin=1Plots.Measures.mm
+    )
+    println("""
+    -------------------
+    Time histogram data
+    -------------------
+
+    The average time is $(round(mean(t), sigdigits=2)) ⨦ $(round(std(t), sigdigits=2)) ns, $(round(mean(t), sigdigits=2)) ns.
+    The minimum time is $(round(minimum(t), sigdigits=2)) ns, and the maximum time is $(round(maximum(t), sigdigits=2)) ns.
+    
+    Filtering the values above 0.2 ns with average time of $(round(median(filter(>(0.2), t)), sigdigits=2)) ns.
+    t > 1.0 ns: $(round(100 * length(filter(>(1.0), t)) / length(filter(>(0.2), t)), sigdigits=2)) of the total.
+    t > 2.0 ns: $(round(100 * length(filter(>(2.0), t)) / length(filter(>(0.2), t)), sigdigits=2)) of the total.
+    t > 3.0 ns: $(round(100 * length(filter(>(3.0), t)) / length(filter(>(0.2), t)), sigdigits=2)) of the total.
+    """)
+    return Plots.current()
+end
+
+
 function t_residence(files::Vector{String}, nbins::Int64; lower=nothing, upper=nothing, n=1)
     t = Float64[]
     for file in files
@@ -679,10 +723,65 @@ function residence(M::BitMatrix, timestep::Float64; step=1, n=1)
     return model
 end
 
-function residence(file::String, timestep::Float64; step=1)
-    M = BitMatrix(readdlm(file, Int64) .== 1)
-    τ, C = residence(M, step=step)
-    return timestep .* τ, C
+function residence(file::String)
+    data = readdlm(file)
+    τ, C = data[:,1], data[:,2]
+    return τ, C
+end
+
+function residence(files::Vector{String}, n::Int64)
+    models = n == 1 ? Vector{EasyFit.SingleExponential{Float64}}() : Vector{EasyFit.MultipleExponential{Float64}}()
+    for file in files
+        if filesize(file) == 0
+            continue
+        end
+        println("Fitting the file $file")
+        τ, C = residence(file)
+        try
+            model = EasyFit.fitexp(τ, C, n=n)
+            push!(models, model)
+        catch e
+            if e isa ErrorException && occursin("Could not obtain any successful fit", e.msg)
+                println("The file $file could not be fitted:", e.msg)
+            else
+                println("The file $file could not be fitted:", e)
+            end
+        end
+    end
+    return models
+end
+
+function residence(files::Vector{String})
+    Plots.gr(size=(1000,800), dpi=900, fmt=:png)
+    τ, C = Vector{Float64}[], Vector{Float64}[]
+    for (i, file) in enumerate(files)
+        if filesize(file) == 0
+            continue
+        end
+        τi, Ci = residence(file)
+        if i == 1
+            Plots.plot(τi, Ci, labels="individual", color="coral2", linewidth=2.0, alpha=0.5)
+        else
+            Plots.plot!(τi, Ci, labels="", color="coral2", linewidth=2.0, alpha=0.5)
+        end
+        push!(τ, τi)
+        push!(C, Ci)
+    end
+    Plots.plot!(
+        mean(τ), mean(C),
+        xlabel="t0 + Δt (ns)", ylabel="C(t)", labels="average",
+        title="", fontfamily=:arial, color="black", linewidth=4.0, alpha=1.0,
+        ## Axis configs
+        framestyle=:box, grid=true, minorgrid=true, minorticks=5,
+        thick_direction=:out, ylims=(0.0, 1.0), xlims=(0.0, 300.0), # maximum(τ[end])
+        ## Font configs
+        titlefontsize=18, guidefontsize=16, tickfontsize=16, labelfontsize=18,
+        legendfontsize=16, guidefonthalign=:center,
+        ## Margins
+        left_margin=5Plots.Measures.mm, right_margin=10Plots.Measures.mm,
+        top_margin=10Plots.Measures.mm, bottom_margin=1Plots.Measures.mm
+    )
+    return Plots.current()
 end
 
 function residence(time::Vector{Float64}, correlation::Vector{Float64}; n=1)
@@ -690,16 +789,38 @@ function residence(time::Vector{Float64}, correlation::Vector{Float64}; n=1)
     return fit
 end
 
-function residence(files::Vector{String}, timestep::Float64; step=1, n=1)
-    models = Vector{EasyFit.SingleExponential{Float64}}(undef, length(files))
-    for (i, file) in enumerate(files)
-        if filesize(file) == 0
+function residence(models::Vector{EasyFit.SingleExponential{Float64}}; threshold=nothing)
+    b = Float64[]
+    R = Float64[]
+    for model in models
+        push!(R, model.R)
+        if !isnothing(threshold) && model.R < threshold
             continue
         end
-        models[i] = residence(file, timestep, step=step, n=n)
+        push!(b, model.b)
     end
-    return models
+    println("""
+    -------------------
+    Residence time data
+    -------------------
+    The quality of this fit is $(extrema(R))...
+    
+    The median value is $(round(median(b), sigdigits=2)) ns.
+    The average residence time is $(round(mean(b), sigdigits=2)) ± $(round(std(b), sigdigits=2)) ns based on $(length(b)) models.
+    The minimum residence time is $(round(minimum(b), sigdigits=2)) ns, and the maximum residence time is $(round(maximum(b), sigdigits=2)) ns.
+    """)
+    return b
 end
+# function residence(files::Vector{String}, timestep::Float64; step=1, n=1)
+#     models = Vector{EasyFit.SingleExponential{Float64}}(undef, length(files))
+#     for (i, file) in enumerate(files)
+#         if filesize(file) == 0
+#             continue
+#         end
+#         models[i] = residence(file, timestep, step=step, n=n)
+#     end
+#     return models
+# end
 
 function checking_residence(checklist::BitVector)
     if iszero(sum(checklist))
