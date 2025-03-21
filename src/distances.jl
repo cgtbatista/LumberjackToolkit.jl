@@ -335,7 +335,7 @@ function water_hbonding(
         @inbounds @threads :static for k in eachindex(candidates)
             iwater = candidates[k]
             i, j = imonitored[mindist[iwater].i], jreference[mindist[iwater].j]
-            oa = @view xyz_buffer[j, :] 
+            oa = @view(xyz_buffer[j, :])
             od = MolSimToolkit.wrap(@view(xyz_buffer[i, :]), oa, uc)
             if haskey(monitored_hydrogens, i)   ## water as h-bond donor
                 hbond_found = false
