@@ -760,29 +760,32 @@ function residence(files::Vector{String})
         end
         τi, Ci = residence(file)
         if i == 1
-            Plots.plot(τi, Ci, labels="individual", color="coral2", linewidth=2.0, alpha=0.5)
+            Plots.plot(τi, Ci, labels="", color="skyblue2", linewidth=4.0, alpha=0.5)
         else
-            Plots.plot!(τi, Ci, labels="", color="coral2", linewidth=2.0, alpha=0.5)
+            Plots.plot!(τi, Ci, labels="", color="skyblue2", linewidth=4.0, alpha=0.5)
         end
         push!(τ, τi)
         push!(C, Ci)
     end
     Plots.plot!(
         mean(τ), mean(C),
-        xlabel="t0 + Δt (ns)", ylabel="C(t)", labels="average",
+        xlabel="", ylabel="", labels="",
         title="", fontfamily=:arial, color="black", linewidth=4.0, alpha=1.0,
         ## Axis configs
         framestyle=:box, grid=true, minorgrid=true, minorticks=5,
-        thick_direction=:out, ylims=(0.0, 1.0), xlims=(0.0, 300.0), # maximum(τ[end])
+        thick_direction=:out, ylims=(0.0, 0.4), xlims=(0.0, 20.0), # maximum(τ[end])
         ## Font configs
-        titlefontsize=18, guidefontsize=16, tickfontsize=16, labelfontsize=18,
-        legendfontsize=16, guidefonthalign=:center,
+        titlefontsize=20, guidefontsize=18, tickfontsize=18, labelfontsize=20,
+        legendfontsize=18, guidefonthalign=:center,
         ## Margins
         left_margin=5Plots.Measures.mm, right_margin=10Plots.Measures.mm,
         top_margin=10Plots.Measures.mm, bottom_margin=1Plots.Measures.mm
     )
     return Plots.current()
 end
+
+### Pegar uma maior de 0-300 ns e colocar um menor dentro (0-20 ns, 0-0.4)
+
 
 function residence(time::Vector{Float64}, correlation::Vector{Float64}; n=1)
     fit = EasyFit.fitexp(time, correlation, n=n)
@@ -811,6 +814,36 @@ function residence(models::Vector{EasyFit.SingleExponential{Float64}}; threshold
     """)
     return b
 end
+
+function residence(models::Vector{EasyFit.MultipleExponential{Float64}}; threshold=nothing)
+    b = Vector{Vector{Float64}}()
+    A = Vector{Vector{Float64}}()
+    R = Float64[]
+    for model in models
+        push!(R, model.R)
+        if !isnothing(threshold) && model.R < threshold
+            continue
+        end
+        push!(b, model.b)
+        push!(A, model.a)
+    end
+    b = hcat(b...)
+    A = hcat(A...)
+    println("""
+    -------------------
+    Residence time data
+    -------------------
+    The quality of this fit is $(extrema(R))...
+    
+    The median value is $(round.(vcat(median(b, dims=2)...), sigdigits=2)) ns.
+    The average residence time is $(round.(vcat(mean(b, dims=2)...), sigdigits=2)) ± $(round.(vcat(std(b, dims=2)...), sigdigits=2)) ns based on $(size(b, 2)) models.
+    The minimum residence time is $(round(minimum(b), sigdigits=2)) ns, and the maximum residence time is $(round(maximum(b), sigdigits=2)) ns.
+    """)
+    return b, A, R
+end
+#  XY1 XY2 XY3 XY4 XY5 XY6 XY7 XY8 XY9 XY10 XY11 XY12 XY13 XY14 XY15 XY16
+#  AN1 AN2 AN3 AN4 AN5 AN6 AN7 AN8 AN9 AN10 AN11 AN12 AN13 AN14 AN15 AN16 AN17 AN18 AN19 AN20 AN21 AN22 AN23 AN24 AN31 AN32
+
 # function residence(files::Vector{String}, timestep::Float64; step=1, n=1)
 #     models = Vector{EasyFit.SingleExponential{Float64}}(undef, length(files))
 #     for (i, file) in enumerate(files)
