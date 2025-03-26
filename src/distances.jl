@@ -737,6 +737,7 @@ function residence(files::Vector{String}, n::Int64)
         end
         println("Fitting the file $file")
         τ, C = residence(file)
+        τ, C = τ[2:end], C[2:end]
         try
             model = EasyFit.fitexp(τ, C, n=n)
             push!(models, model)
@@ -755,6 +756,7 @@ function residence(files::Vector{String}, model::Function; initial=[1.0, 1.0, 0.
     # teste(t, p) = p[1] * exp.(-(t ./ p[2]).^p[3])
     # using SpecialFunctions
     # t(b, β) = b * gamma(1 + 1/β)
+    # t(A, b, β) = A * b * gamma(1/β) / β
     models = Vector{Vector{Float64}}()
     for file in files
         if filesize(file) == 0
@@ -763,8 +765,11 @@ function residence(files::Vector{String}, model::Function; initial=[1.0, 1.0, 0.
         println("Fitting the file $file")
         τ, C = residence(file)
         try
+            τ, C = τ[2:end], C[2:end]
             fitting = LsqFit.curve_fit(model, τ, C, initial)
             par1, par2, par3 = fitting.param
+            t(b, β) = b * gamma(1 + 1/β)
+            t(A, b, β) = A * b * gamma(1/β) / β
             ## R²
             C_pred = model(τ, fitting.param)
             residuals = C - C_pred
@@ -781,12 +786,15 @@ function residence(files::Vector{String}, model::Function; initial=[1.0, 1.0, 0.
             τ = $(round(par2, sigdigits=4))
             β = $(round(par3, sigdigits=4))
             R² = $(round(R, sigdigits=4))
+
+            -- <t> is $(round(t(par2, par3), sigdigits=4)) ns (Weibull).
+            -- <t> is $(round(t(par1, par2, par3), sigdigits=4)) ns (Sonoda/Skaff).
             """)
         catch e
             println("The file $file could not be fitted:", e)
         end
     end
-    return models
+    return models ## A, b, β, R²
 end
 
 function residence(files::Vector{String})
@@ -857,6 +865,7 @@ function residence(models::Vector{EasyFit.MultipleExponential{Float64}}; thresho
     b = Vector{Vector{Float64}}()
     A = Vector{Vector{Float64}}()
     R = Float64[]
+    I = Float64[]
     for (i, model) in enumerate(models)
         push!(R, model.R)
         if !isnothing(threshold) && model.R < threshold
@@ -865,6 +874,7 @@ function residence(models::Vector{EasyFit.MultipleExponential{Float64}}; thresho
         end
         push!(b, model.b)
         push!(A, model.a)
+        push!(I, sum(model.a .* model.b))
     end
     b = hcat(b...)
     A = hcat(A...)
@@ -872,13 +882,13 @@ function residence(models::Vector{EasyFit.MultipleExponential{Float64}}; thresho
     -------------------
     Residence time data
     -------------------
-    The quality of this fit is $(extrema(R))...
+    The quality of this fit is $(extrema(R))... and τ_avg = $(round(mean(I), sigdigits=2)) ns.
     
     The median value is $(round.(vcat(median(b, dims=2)...), sigdigits=2)) ns.
     The average residence time is $(round.(vcat(mean(b, dims=2)...), sigdigits=2)) ± $(round.(vcat(std(b, dims=2)...), sigdigits=2)) ns based on $(size(b, 2)) models.
     The minimum residence time is $(round(minimum(b), sigdigits=2)) ns, and the maximum residence time is $(round(maximum(b), sigdigits=2)) ns.
     """)
-    return b, A, R
+    return b, A, R, I
 end
 #  XY1 XY2 XY3 XY4 XY5 XY6 XY7 XY8 XY9 XY10 XY11 XY12 XY13 XY14 XY15 XY16
 #  AN1 AN2 AN3 AN4 AN5 AN6 AN7 AN8 AN9 AN10 AN11 AN12 AN13 AN14 AN15 AN16 AN17 AN18 AN19 AN20 AN21 AN22 AN23 AN24 AN31 AN32
@@ -914,4 +924,47 @@ function checking_residence(checklist::BitVector)
         push!(counting, counter)
     end
     return counting
+end
+
+
+function residence(
+    files::Vector{String}, labels::Vector{String},
+    biexp::Vector{EasyFit.MultipleExponential{Float64}},
+    stretched::Vector{Vector{Float64}},
+    ypred::Vector{Float64};
+    icolors=mycolorblind
+)
+    Plots.gr(size=(1000,800), dpi=900, fmt=:png)
+    strech(t, p) = p[1] * exp.(-(t ./ p[2]).^p[3])
+    for (i, file) in enumerate(files)
+        if filesize(file) == 0
+            continue
+        end
+        τ, C = residence(file)
+        τ, C = τ[2:end], C[2:end]
+        Cpred1 = biexp[i].ypred                 ## biexponential
+        Cpred2 = strech(τ, stretched[i][1:3])   ## stretched exponential
+        if i == 1
+            Plots.scatter(τ, C, labels=labels[i], markerstrokewidth=0, alpha=0.7, markersize=6.0,
+                xlabel="t (ns)", ylabel="C(t)", title="", fontfamily=:arial, color=icolors[i],
+                ## Axis configs
+                framestyle=:box, grid=true, minorgrid=true, minorticks=5,
+                thick_direction=:out, ylims=(0.0, 0.4), xlims=(0.0, 50.0), # maximum(τ[end])
+                ## Font configs
+                titlefontsize=20, guidefontsize=18, tickfontsize=18, labelfontsize=20,
+                legendfontsize=18, guidefonthalign=:center,
+                ## Margins
+                left_margin=5Plots.Measures.mm, right_margin=10Plots.Measures.mm,
+                top_margin=10Plots.Measures.mm, bottom_margin=1Plots.Measures.mm
+            )
+            Plots.plot!(τ, Cpred1, labels="", linewidth=4.0, linestyle=:solid, color=icolors[i])
+            Plots.plot!(τ, Cpred2, labels="", linewidth=4.0, linestyle=:dash, color=icolors[i])
+            Plots.plot!(τ, ypred, labels="old", linewidth=4.0, linestyle=:solid, color="red")
+            continue
+        end
+        # Plots.scatter!(τ, C, labels=labels[i], markerstrokewidth=0, alpha=0.7, markersize=6.0, color=icolors[i])
+        # Plots.plot!(τ, Cpred1, labels="", linewidth=4.0, linestyle=:solid, color=icolors[i])
+        # Plots.plot!(τ, Cpred2, labels="", linewidth=4.0, linestyle=:dash, color=icolors[i])
+    end
+    return Plots.current()
 end

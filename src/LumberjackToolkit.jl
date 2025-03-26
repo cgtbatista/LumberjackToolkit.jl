@@ -11,6 +11,7 @@ import FFTW: rfft, irfft
 import MDLovoFit_jll: mdlovofit
 import DelimitedFiles: readdlm, writedlm
 import Printf: @sprintf, @printf
+import SpecialFunctions: gamma
 import StaticArrays: @SVector, SVector, SMatrix, @SMatrix, MArray
 import Statistics: mean, median, std, var
 import StatsBase: Histogram, fit
