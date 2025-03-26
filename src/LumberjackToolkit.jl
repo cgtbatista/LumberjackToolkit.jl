@@ -2,6 +2,7 @@ module LumberjackToolkit
 
 import PDBTools
 import EasyFit
+import LsqFit
 import MolSimToolkit
 import StatsPlots, Plots
 import Interpolations

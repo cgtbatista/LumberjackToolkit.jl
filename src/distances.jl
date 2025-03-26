@@ -751,6 +751,44 @@ function residence(files::Vector{String}, n::Int64)
     return models
 end
 
+function residence(files::Vector{String}, model::Function; initial=[1.0, 1.0, 0.5])
+    # teste(t, p) = p[1] * exp.(-(t ./ p[2]).^p[3])
+    # using SpecialFunctions
+    # t(b, β) = b * gamma(1 + 1/β)
+    models = Vector{Vector{Float64}}()
+    for file in files
+        if filesize(file) == 0
+            continue
+        end
+        println("Fitting the file $file")
+        τ, C = residence(file)
+        try
+            fitting = LsqFit.curve_fit(model, τ, C, initial)
+            par1, par2, par3 = fitting.param
+            ## R²
+            C_pred = model(τ, fitting.param)
+            residuals = C - C_pred
+            SSres = sum(residuals.^2)
+            SStot = sum(
+                (C .- mean(C)).^2
+            )
+            R = 1 - SSres / SStot
+            push!(models, [par1, par2, par3, R])
+            println("""
+            Parameters of the fit: $file
+            -------------------
+            A = $(round(par1, sigdigits=4))
+            τ = $(round(par2, sigdigits=4))
+            β = $(round(par3, sigdigits=4))
+            R² = $(round(R, sigdigits=4))
+            """)
+        catch e
+            println("The file $file could not be fitted:", e)
+        end
+    end
+    return models
+end
+
 function residence(files::Vector{String})
     Plots.gr(size=(1000,800), dpi=900, fmt=:png)
     τ, C = Vector{Float64}[], Vector{Float64}[]
@@ -819,9 +857,10 @@ function residence(models::Vector{EasyFit.MultipleExponential{Float64}}; thresho
     b = Vector{Vector{Float64}}()
     A = Vector{Vector{Float64}}()
     R = Float64[]
-    for model in models
+    for (i, model) in enumerate(models)
         push!(R, model.R)
         if !isnothing(threshold) && model.R < threshold
+            println("The model $i was not considered.")
             continue
         end
         push!(b, model.b)
