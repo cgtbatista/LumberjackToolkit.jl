@@ -305,21 +305,20 @@ function gaussian_profile_1D(
             hist[idx] += d
         end
         hist ./= Vbin
-        return hist
-        @. hist = hist .>= cutoff ? hist : 0.0
+        hist = ifelse.(hist .>= cutoff, hist, 0.0)
         densities[:,iframe] = hist
         if !hascenter
-            Mbins[:,iframe] = avgbins(bins)
+            Mbins[:,iframe] = avgbins(bin_edges)
         else
             avg = mean(coord[dim] for coord in coords)
             if hassymmetry
-                Mbins[:,iframe] = _fix_binning_symmetry(bins, avg)
+                Mbins[:,iframe] = _fix_binning_symmetry(bin_edges, avg)
                 if !issorted(Mbins[:,iframe])
                     isorted = sortperm(Mbins[:,iframe])
                     Mbins[:,iframe], densities[:,iframe] = Mbins[isorted,iframe], densities[isorted,iframe]
                 end
             else
-                Mbins[:,iframe] = _fix_binning_center(bins, avg)
+                Mbins[:,iframe] = _fix_binning_center(bin_edges, avg)
             end
         end
     end
