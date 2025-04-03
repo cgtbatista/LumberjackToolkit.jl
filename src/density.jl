@@ -173,7 +173,7 @@ function binspecs2D(dim1::Int, dim2::Int, lower::AbstractVector, upper::Abstract
     return V, collect(edges1), collect(edges2)
 end
 
-@inline function extremacoordinates(simulation::MolSimToolkit.Simulation, indices::AbstractVector{Int32})
+@inline function extremacoordinates(simulation::MolSimToolkit.Simulation, indices::AbstractVector)
     lower, upper = fill(Inf, 3), fill(-Inf, 3)
     @inbounds for frame in simulation
         coords = MolSimToolkit.positions(frame)[indices]
@@ -239,7 +239,7 @@ end
 
 function gridpoints(
     simulation::MolSimToolkit.Simulation,
-    indices::AbstractVector{Int32},
+    indices::AbstractVector,
     resolution::Float64;
     margin::Float64=0.0
 )
@@ -469,7 +469,6 @@ function gaussian_profile_2D(
     margin=0.0,
     hascenter=true, hassymmetry=true
 )
-    #BIN1, BIN2, DENS = [], [], []
     dims = get(
         Dict{String, Vector{Int}}(
             "xy" => [1, 2], "yx" => [1, 2], "xz" => [1, 3],
@@ -478,45 +477,57 @@ function gaussian_profile_2D(
     )
     isnothing(dims) && throw(ArgumentError("The axis should be associated with the labels of cartesian axes."))
     dim = filter(t -> !in(t, dims), 1:3)[1]
+    iatoms = PDBTools.index.(simulation.atoms)
     ## binning and pre-allocation
     Vbin, bin_edges_1, bin_edges_2 = binning(simulation, axis=axis, binwidth=binwidth, margin=margin)
     cs_bin_edges = binning(simulation, axis=notaxis(axis), binwidth=cswidth)[2]
+    nbins1, nbins2, nframes = length(bin_edges_1)-1, length(bin_edges_2)-1, length(simulation)
     nslabs = length(cs_bin_edges)-1
-    densities = [
-        zeros(Float64, length(bin_edges_1)-1, length(bin_edges_2)-1, nslabs)
-        for _ in 1:length(simulation)
-    ]
-    iatoms = PDBTools.index.(simulation.atoms)
+    densities = [ zeros(Float64, nbins1, nbins2, nslabs) for _ in 1:nframes ]
+    bincenters1 = zeros(Float64, nframes)
+    bincenters2 = zeros(Float64, nframes)
     ## gaussian data
     A = Q[iatoms] ./ (sqrt(2π) .* σ).^3
     β = inv.(-2σ.^2) .* ones(Float64, length(iatoms))
+    ## gridpoints to calculate density
     points = gridpoints(simulation, resolution; margin=margin)
-    dimcoords1 = [ point[dims[1]] for point in points ]
-    dimcoords2 = [ point[dims[2]] for point in points ]
-    density = zeros(Float64, length(points))
+    dimcoords1, dimcoords2 = [ point[dims[1]] for point in points ], [ point[dims[2]] for point in points ]
     for (iframe, frame) in enumerate(simulation)
         coords = MolSimToolkit.positions(frame)[iatoms]
         slabindices =get_slab_indices(coords, dim, cs_bin_edges)
+        bincenters1 = mean(coord[dims[1]] for coord in coords)
+        bincenters2 = mean(coord[dims[2]] for coord in coords)
         for islab in 1:nslabs
             mask = slabindices .== islab
             sum(mask) == 0 && continue
-            println("align.jlqui")
+            density = zeros(Float64, length(points))
             gaussian_density_function!(density, points, coords[mask], A[mask], β[mask])
-            ibin = clamp.(searchsortedfirst.(Ref(bin_edges_1), dimcoords1) .- 1, 1, length(bin_edges_1)-1)
-            jbin = clamp.(searchsortedfirst.(Ref(bin_edges_2), dimcoords2) .- 1, 1, length(bin_edges_2)-1)
+            ibin = clamp.(
+                searchsortedfirst.(Ref(bin_edges_1), dimcoords1) .- 1, 1, nbins1
+            )
+            jbin = clamp.(
+                searchsortedfirst.(Ref(bin_edges_2), dimcoords2) .- 1, 1, nbins2
+            )
             @inbounds @fastmath for p in 1:length(points)
                 i, j = ibin[p], jbin[p]
                 densities[iframe][i, j, islab] += density[p]
             end
-            densities[:,:, islab, iframe] ./= Vbin
-            density .= 0.0
-            return densities
+            densities[iframe][:, :, islab] ./= Vbin
+            densities[:,iframe] = ifelse.(hist .>= cutoff, hist / Vbin, 0.0)
         end
     end
-
-    Mbins1 = Matrix{Float64}(undef, length(bin_edges_1)-1, length(simulation))
-    Mbins2 = Matrix{Float64}(undef, length(bin_edges_2)-1, length(simulation))
-    return BIN1, BIN2, DENS
+    bins1 = [ zeros(Float64, nbins1, nslabs) for _ in 1:nframes ]
+    bins2 = [ zeros(Float64, nbins2, nslabs) for _ in 1:nframes ]
+    @threads for iframe in 1:nframes
+        tmp_bins1 = avgbins(bin_edges_1, bincenters1[iframe]; hascenter=hascenter, hassymmetry=hassymmetry)
+        tmp_bins2 = avgbins(bin_edges_2, bincenters2[iframe]; hascenter=hascenter, hassymmetry=hassymmetry)
+        tmp_bins1, tmp_bins2 = sort(tmp_bins1), sort(tmp_bins2)
+        for islab in 1:nslabs
+            bins1[iframe][:, islab] = sort(tmp_bins1)
+            bins2[iframe][:, islab] = sort(tmp_bins2)
+        end
+    end
+    return bins1, bins2, densities
 end
 
 # function gaussian_profile_2D(
