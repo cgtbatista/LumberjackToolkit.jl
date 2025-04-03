@@ -481,6 +481,7 @@ function gaussian_profile_2D(
     ## binning and pre-allocation
     Vbin, bin_edges_1, bin_edges_2 = binning(simulation, axis=axis, binwidth=binwidth, margin=margin)
     cs_bin_edges = binning(simulation, axis=notaxis(axis), binwidth=cswidth)[2]
+    # Vbin = length(iatoms) * binwidth^2 * cswidth
     nbins1, nbins2, nframes = length(bin_edges_1)-1, length(bin_edges_2)-1, length(simulation)
     nslabs = length(cs_bin_edges)-1
     densities = [ zeros(Float64, nbins1, nbins2, nslabs) for _ in 1:nframes ]
@@ -495,8 +496,8 @@ function gaussian_profile_2D(
     for (iframe, frame) in enumerate(simulation)
         coords = MolSimToolkit.positions(frame)[iatoms]
         slabindices =get_slab_indices(coords, dim, cs_bin_edges)
-        bincenters1 = mean(coord[dims[1]] for coord in coords)
-        bincenters2 = mean(coord[dims[2]] for coord in coords)
+        bincenters1[iframe] = mean(coord[dims[1]] for coord in coords)
+        bincenters2[iframe] = mean(coord[dims[2]] for coord in coords)
         for islab in 1:nslabs
             mask = slabindices .== islab
             sum(mask) == 0 && continue
@@ -512,94 +513,24 @@ function gaussian_profile_2D(
                 i, j = ibin[p], jbin[p]
                 densities[iframe][i, j, islab] += density[p]
             end
-            densities[iframe][:, :, islab] ./= Vbin
-            densities[:,iframe] = ifelse.(hist .>= cutoff, hist / Vbin, 0.0)
+            densities[iframe][:, :, islab] = ifelse.(
+                densities[iframe][:, :, islab] .>= cutoff, Vbin .\ densities[iframe][:, :, islab], 0.0
+            )
         end
     end
     bins1 = [ zeros(Float64, nbins1, nslabs) for _ in 1:nframes ]
     bins2 = [ zeros(Float64, nbins2, nslabs) for _ in 1:nframes ]
     @threads for iframe in 1:nframes
-        tmp_bins1 = avgbins(bin_edges_1, bincenters1[iframe]; hascenter=hascenter, hassymmetry=hassymmetry)
-        tmp_bins2 = avgbins(bin_edges_2, bincenters2[iframe]; hascenter=hascenter, hassymmetry=hassymmetry)
-        tmp_bins1, tmp_bins2 = sort(tmp_bins1), sort(tmp_bins2)
+        bins_tmp_1 = avgbins(bin_edges_1, bincenters1[iframe]; hascenter=hascenter, hassymmetry=hassymmetry)
+        bins_tmp_2 = avgbins(bin_edges_2, bincenters2[iframe]; hascenter=hascenter, hassymmetry=hassymmetry)
+        bins_tmp_1, bins_tmp_2 = sort(bins_tmp_1), sort(bins_tmp_2)
         for islab in 1:nslabs
-            bins1[iframe][:, islab] = sort(tmp_bins1)
-            bins2[iframe][:, islab] = sort(tmp_bins2)
+            bins1[iframe][:, islab] = sort(bins_tmp_1)
+            bins2[iframe][:, islab] = sort(bins_tmp_2)
         end
     end
     return bins1, bins2, densities
 end
-
-# function gaussian_profile_2D(
-#     sim::MolSimToolkit.Simulation, Q::Vector{Float64};
-#     axis="xz", cutoff=1.0, cs=4.0, resolution=0.5, σ=1.0, hascenter=true, hassymmetry=true
-# )
-#     BIN1, BIN2, DENS = [], [], []
-#     axescode = Dict{String, Function}([
-#         ["xy", "yx"] .=> () -> [1,2]; ["xz", "zx"] .=> () -> [1,3]; ["yz", "zy"] .=> () -> [2,3]
-#     ])
-#     if !haskey(axescode, lowercase(axis))
-#         throw(ArgumentError("The axis should be associated with the labels of cartesian axes."))
-#     end
-#     dims = axis2dims(axis)
-#     dim = axis2dims(notaxis(axis))
-#     V, bin1, bin2 = binning(sim, axis=axis, cutoff=cutoff)
-#     cs = binning(sim, axis=notaxis(axis), cutoff=cs)[2]
-#     bins1 = Matrix{Float64}(undef, length(bin1)-1, length(sim))
-#     bins2 = Matrix{Float64}(undef, length(bin2)-1, length(sim))
-#     densities = zeros(Float64, length(bin1)-1, length(bin2)-1, length(sim))
-#     iatoms = PDBTools.index.(sim.atoms)
-#     for (iframe, frame) in enumerate(sim)
-#         xyz = MolSimToolkit.positions(frame)[iatoms]
-#         σ = σ .* ones(Float64, length(iatoms))
-#         A = Q[iatoms] ./ (sqrt(2π) .* σ).^3
-#         α = inv.(-2 .* σ.^ 2)
-#         ρ(r) = sum(
-#             A .* exp.(α .* [ sum((r .- ijk).^2) for ijk in xyz ])
-#         )
-#         for slice in 1:length(cs)-1
-#             coords = filter(coord -> cs[slice] <= coord[dim] <= cs[slice+1], xyz)
-#             if isempty(coords)
-#                 continue
-#             end
-#             points = density_grid(coords, resolution)
-#             density = ρ.(points)
-#             ibin = [ searchsortedfirst(bin1, point[dims[1]]) for point in points ]
-#             jbin = [ searchsortedfirst(bin2, point[dims[2]]) for point in points ]
-#             @inbounds for p in 1:length(points)
-#                 i, j = ibin[p], jbin[p]
-#                 if 1 <= i <= size(densities, 1) && 1 <= j <= size(densities, 2)
-#                     densities[i, j, iframe] += density[p]
-#                 end
-#             end
-#             densities[:,:,iframe] ./= V
-#             if !hascenter
-#                 bins1[:,iframe], bins2[:,iframe] = avgbins(bin1), avgbins(bin2)
-#             else
-#                 avg = mean([ coord[dims] for coord in coords ])
-#                 if hassymmetry
-#                     bins1[:,iframe] = _fix_binning_symmetry(bin1, avg[1])
-#                     bins2[:,iframe] = _fix_binning_symmetry(bin2, avg[2])
-#                     if !issorted(bins1[:,iframe]) || !issorted(bins2[:,iframe])
-#                         isorted, jsorted = sortperm(bins1[:,iframe]), sortperm(bins2[:,iframe])
-#                         bins1[:,iframe], bins2[:,iframe] = bins1[isorted,iframe], bins2[jsorted,iframe]
-#                         densities[:,:,iframe] = densities[isorted,jsorted,iframe]
-#                     end
-#                 else
-#                     bins1[:,iframe] = _fix_binning_center(bin1, avg[1])
-#                     bins2[:,iframe] = _fix_binning_center(bin2, avg[2])
-#                 end
-#             end
-#             push!(BIN1, deepcopy(bins1))
-#             push!(BIN2, deepcopy(bins2))
-#             push!(DENS, deepcopy(densities))
-#             densities .= 0.0
-#         end
-#     end
-#     return BIN1, BIN2, DENS
-# end
-
-################################################################ Fibril width
 
 function mapping_density(density::Array{T, 3}; tol=0.005) where T
     checklist = zeros(Bool, size(density, 1), size(density, 2), size(density, 3))
@@ -672,4 +603,72 @@ function fibrilwidth(
         end
     end
     return results
+end
+
+######################################################### PLOTTING
+
+function density_profile(
+    bin1::Matrix{Float64}, bin2::Matrix{Float64}, densities::Array{Float64, 3};
+    frame=nothing, smoothing=false, bins=200, colors=:Greens,
+    xlabel="x-axis (Å)", ylabel="y-axis (Å)", xlims=nothing, ylims=nothing
+)
+    @assert size(bin1, 2) == size(bin2, 2) == size(densities, 3) "The number of frames should be the same."
+    xlims = !isnothing(xlims) ? (-xlims, xlims) : (minimum(bin1), maximum(bin1))
+    ylims = !isnothing(ylims) ? (-ylims, ylims) : (minimum(bin2), maximum(bin2))
+    if isnothing(frame)
+        edp_plotting_averages(
+            bin1, bin2, densities; smoothing=smoothing, bins=bins, colors=colors,
+            xlabel=xlabel, ylabel=ylabel, xlims=xlims, ylims=ylims
+        )
+    end
+    return Plots.current()
+end
+
+function edp_plotting_averages(
+    bin1, bin2, densities; smoothing=true, bins=200, colors=:Greens,
+    xlabel="x-axis (Å)", ylabel="y-axis (Å)", xlims=nothing, ylims=nothing
+)
+    nframes = size(densities, 3)
+    projx = smoothing ? zeros(Float64, bins) : zeros(Float64, size(bin1, 1))
+    projy = smoothing ? zeros(Float64, bins) : zeros(Float64, size(bin2, 1))
+    ρ_new = smoothing ? zeros(Float64, bins, bins) : zeros(Float64, size(densities, 1), size(densities, 2))
+    for iframe in 1:nframes
+        x, y, z = if smoothing
+                interpol(bin1[:,iframe], bin2[:,iframe], densities[:,:,iframe], bins=bins)
+            else
+                bin1[:,iframe], bin2[:,iframe], densities[:,:,iframe]
+        end
+        projx .+= x
+        projy .+= y
+        ρ_new .+= z
+    end
+    projx ./= nframes
+    projy ./= nframes
+    ρ_new ./= nframes
+    Plots.gr(size=(1000,800), dpi=900, fmt=:png)
+    Plots.heatmap(
+        projx, projy, ρ_new',
+        color=colors,
+        clims=(minimum(ρ_new), maximum(ρ_new)),
+        xlabel=xlabel, ylabel=ylabel, fontfamily=:arial,
+        ## Axis configs
+        xlims=xlims, ylims=ylims,
+        framestyle=:box,
+        grid=true,
+        minorgrid=true,
+        minorticks=5,
+        thick_direction=:out,
+        ## Font configs
+        titlefontsize=18,
+        guidefontsize=16,
+        tickfontsize=16,
+        labelfontsize=18,
+        legendfontsize=16,
+        guidefonthalign=:center,
+        ## Margins
+        left_margin=5Plots.Measures.mm,
+        right_margin=10Plots.Measures.mm,
+        top_margin=10Plots.Measures.mm,
+        bottom_margin=1Plots.Measures.mm
+    )
 end
