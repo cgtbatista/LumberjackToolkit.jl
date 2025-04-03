@@ -15,7 +15,7 @@ const _bglc_charmm_partialcharges = Dict{String, Float64}([
       "HO4", "HO6" ]            .=>  0.420;  ##                             β-D-Glucose – CHARMM36 Partial Charges
 ])
 
-function charmm_partialcharges(atom::String, residue::String)
+function charmm_partialcharges(atom::AbstractString, residue::AbstractString)
     if in(residue, ["BGLC", "BGC", "GLC"])
         if haskey(_bglc_charmm_partialcharges, atom)
             return round(_bglc_charmm_partialcharges[atom], digits=3)
@@ -66,42 +66,59 @@ function electrons(atoms::Vector{<:PDBTools.Atom}; qcorrection=true)
     return round.(e, digits=3)
 end
 
+function interpol(x::AbstractVector{T}, y::AbstractVector{T}, z::Matrix{T}; bins=200) where T
+    itp = Interpolations.linear_interpolation((x, y), z, extrapolation_bc=NaN)
+    xnew = range(minimum(x), maximum(x), length=bins)
+    ynew = range(minimum(y), maximum(y), length=bins)
+    znew = [ itp(i,j) for i in xnew, j in ynew ]
+    return xnew, ynew, znew
+end
+
 function notaxis(axis::String)
-    axis = split(lowercase(axis), "")
-    notaxis = filter(i -> !in(i, axis), ["x", "y", "z"])
+    notaxis = filter(
+        i -> !in(i, split(lowercase(axis), "")),
+        ["x", "y", "z"]
+    )
     return join(notaxis)
 end
 
-function axis2dims(axis::String)
-    axis = split(lowercase(axis), "")
-    if length(axis) == 1
-        return Dict{String, Int}(
-            "x" => 1,
-            "y" => 2,
-            "z" => 3
-        )[axis[1]]
-    elseif length(axis) == 2
-        return Dict{String, Function}([
-            ["xy", "yx"] .=> () -> [1, 2];
-            ["xz", "zx"] .=> () -> [1, 3];
-            ["yz", "zy"] .=> () -> [2, 3]
-        ])[join(axis)]()
+# function axis2dims(axis::String)
+#     axis = split(lowercase(axis), "")
+#     if length(axis) == 1
+#         return Dict{String, Int}(
+#             "x" => 1,
+#             "y" => 2,
+#             "z" => 3
+#         )[axis[1]]
+#     elseif length(axis) == 2
+#         return Dict{String, Function}([
+#             ["xy", "yx"] .=> () -> [1, 2];
+#             ["xz", "zx"] .=> () -> [1, 3];
+#             ["yz", "zy"] .=> () -> [2, 3]
+#         ])[join(axis)]()
+#     end
+# end
+
+@inline function avgbins(bin_edges::Vector{Float64})
+    return 0.5 .* (bin_edges[1:end-1] + bin_edges[2:end])
+end
+
+@inline function avgbins(bin_edges::Vector{Float64}, average::Float64; hascenter::Bool=true, hassymmetry::Bool=true)
+    if !hascenter
+        return avgbins(bin_edges)
     end
+    return hassymmetry ? _fix_binning_symmetry(bin_edges, average) : _fix_binning_center(bin_edges, average)
 end
 
-function avgbins(bins::Vector{Float64})
-    return 0.5 .* (bins[1:end-1] + bins[2:end])
+@inline function _fix_binning_center(bin_edges::Vector{Float64}, center::Float64)
+    return avgbins(bin_edges .- center)
 end
 
-function _fix_binning_center(bins::Vector{Float64}, center::Float64)
-    return avgbins(bins .- center)
-end
-
-function _fix_binning_symmetry(bins::Vector{Float64}, center::Float64)
-    lower, upper = extrema(bins)
+@inline function _fix_binning_symmetry(bin_edges::Vector{Float64}, center::Float64)
+    lower, upper = extrema(bin_edges)
     ΔL = upper - lower
-    avgbins = _fix_binning_center(bins, center)
-    return mod.(avgbins .+ 0.5*ΔL, ΔL) .- 0.5*ΔL
+    avg = _fix_binning_center(bin_edges, center)
+    return mod.(avg .+ 0.5*ΔL, ΔL) .- 0.5*ΔL
 end
 
 function binning(avgbins::Vector{Float64})
@@ -156,6 +173,17 @@ function binspecs2D(dim1::Int, dim2::Int, lower::AbstractVector, upper::Abstract
     return V, collect(edges1), collect(edges2)
 end
 
+@inline function extremacoordinates(simulation::MolSimToolkit.Simulation, indices::AbstractVector{Int32})
+    lower, upper = fill(Inf, 3), fill(-Inf, 3)
+    @inbounds for frame in simulation
+        coords = MolSimToolkit.positions(frame)[indices]
+        mincoord, maxcoord = extremacoordinates(coords)
+        lower .= min.(lower, mincoord)
+        upper .= max.(upper, maxcoord)
+    end
+    return lower, upper
+end
+
 @inline function extremacoordinates(simulation::MolSimToolkit.Simulation)
     lower, upper = fill(Inf, 3), fill(-Inf, 3)
     @inbounds for frame in simulation
@@ -173,14 +201,6 @@ end
         lower[dim], upper[dim] = extrema(coord[dim] for coord in coords)
     end
     return lower, upper
-end
-
-function interpol(x::AbstractVector{T}, y::AbstractVector{T}, z::Matrix{T}; bins=200) where T
-    itp = Interpolations.linear_interpolation((x, y), z, extrapolation_bc=NaN)
-    xnew = range(minimum(x), maximum(x), length=bins)
-    ynew = range(minimum(y), maximum(y), length=bins)
-    znew = [ itp(i,j) for i in xnew, j in ynew ]
-    return xnew, ynew, znew
 end
 
 function gridpoints(
@@ -201,11 +221,29 @@ function gridpoints(
 end
 
 function gridpoints(
-    sim::MolSimToolkit.Simulation,
+    simulation::MolSimToolkit.Simulation,
     resolution::Float64;
     margin::Float64=0.0
 )
-    lower, upper = extremacoordinates(sim)
+    lower, upper = extremacoordinates(simulation)
+    lower .-= margin
+    upper .+= margin
+    points = [
+        SVector(x, y, z) for
+            x in lower[1]:resolution:upper[1],
+            y in lower[2]:resolution:upper[2],
+            z in lower[3]:resolution:upper[3]
+    ]
+    return points
+end
+
+function gridpoints(
+    simulation::MolSimToolkit.Simulation,
+    indices::AbstractVector{Int32},
+    resolution::Float64;
+    margin::Float64=0.0
+)
+    lower, upper = extremacoordinates(simulation, indices)
     lower .-= margin
     upper .+= margin
     points = [
@@ -244,23 +282,85 @@ function density_profile(
     if length(axis) == 2
         return gaussian_profile_2D(
             sim, property,
-            axis=axis, cutoff=cutoff, resolution=resolution, σ=σ, cs=cs,
-            hascenter=hascenter, hassymmetry=hassymmetry
+            axis=axis, binwidth=binwidth, cutoff=cutoff, resolution=resolution, σ=σ, cswidth=cs, margin=margin,
+            hascenter=hascenter, hassymmetry=hassymmetry     
         )
     end
 end
 
-function gaussmap(coords::MolSimToolkit.FramePositions, Q::Vector{Float64}, σ::Vector{Float64})
-    A = Q ./ (sqrt(2π) .* σ).^3
-    α = 2σ.^2 .\ -1
-    ρ(r) = sum(
-        A .* exp.(α .* [ sum((r .- coord).^2) for coord in coords ])
+# function gaussmap(coords::MolSimToolkit.FramePositions, Q::Vector{Float64}, σ::Vector{Float64})
+#     A = Q ./ (sqrt(2π) .* σ).^3
+#     α = 2σ.^2 .\ -1
+#     ρ(r) = sum(
+#         A .* exp.(α .* [ sum((r .- coord).^2) for coord in coords ])
+#     )
+#     return ρ
+# end
+
+function ρ(coords::MolSimToolkit.FramePositions, A::Vector{Float64}, β::Vector{Float64})
+    density(r) = sum(
+        A .* exp.(β .* [ sum((r .- coord).^2) for coord in coords ])
     )
-    return ρ
+    return density
+end
+
+function gaussian_density_function!(
+    density::Vector{T},
+    points::AbstractArray{<:SVector{3, T}},
+    coords::MolSimToolkit.FramePositions,
+    A::Vector{T},
+    β::Vector{T}
+) where T
+    npoints = length(points)
+    natoms = length(coords)
+    Threads.@threads for i in 1:npoints
+        r = points[i]
+        sum_d = 0.0
+        @inbounds @fastmath for j in 1:natoms
+            Δx = r[1] - coords[j][1]
+            Δy = r[2] - coords[j][2]
+            Δz = r[3] - coords[j][3]
+            sum_d += A[j] * exp(β[j] * (Δx^2 + Δy^2 + Δz^2))
+        end
+        density[i] = sum_d
+    end
+end
+
+function gaussian_density_function(
+    gridpoints::AbstractArray{<:SVector{3, T}},
+    coords::MolSimToolkit.FramePositions,
+    A::Vector{T},
+    β::Vector{T}
+) where T
+    density = zeros(T, length(gridpoints))
+    @inbounds @fastmath Threads.@threads for i in eachindex(gridpoints)
+        r = gridpoints[i]
+        sum_val = 0.0
+        for j in eachindex(coords)
+            dx = r[1] - coords[j][1]
+            dy = r[2] - coords[j][2]
+            dz = r[3] - coords[j][3]
+            sum_val += A[j] * exp(β[j] * (dx^2 + dy^2 + dz^2))
+        end
+        density[i] = sum_val
+    end
+    return density
+end
+
+function searching_slabs(coords::MolSimToolkit.FramePositions, dim::Int, bin_edges::AbstractVector)
+    indices = searchsortedfirst.(Ref(bin_edges), coord[dim] for coord in coords) .- 1
+    return clamp.(
+        indices, 1, length(bin_edges)-1
+    )
+end
+
+function get_slab_indices(coords, z_dim, edges)
+    z_coords = [c[z_dim] for c in coords]
+    return clamp.(searchsortedfirst.(Ref(edges), z_coords) .- 1, 1, length(edges)-1)
 end
 
 function gaussian_profile_1D(
-    sim::MolSimToolkit.Simulation, Q::Vector{Float64};
+    simulation::MolSimToolkit.Simulation, Q::Vector{Float64};
     axis="z",
     cutoff=0.05,
     binwidth=0.25,
@@ -269,62 +369,47 @@ function gaussian_profile_1D(
     margin=0.0,
     hascenter=true, hassymmetry=true
 )
-    dim = get(
-        Dict{String, Int64}("x" => 1, "y" => 2, "z" => 3), lowercase(axis), nothing
-    )
+    dim = get(Dict{String, Int64}("x" => 1, "y" => 2, "z" => 3), lowercase(axis), nothing)
     isnothing(dim) && throw(ArgumentError("The axis should be associated with the labels of cartesian axes."))
-    Vbin, bin_edges = binning(sim; axis=axis, binwidth=binwidth, margin=margin)
-    nbins, nframes = length(bin_edges)-1, length(sim)
-    Mbins = zeros(Float64, nbins, nframes)
-    densities = deepcopy(Mbins)
+    Vbin, bin_edges = binning(
+        simulation;
+        axis=axis, binwidth=binwidth, margin=margin
+    )
+    nbins, nframes = length(bin_edges)-1, length(simulation)
+    bincenters = zeros(Float64, nframes)
+    densities = zeros(Float64, nbins, nframes)
+    iatoms = PDBTools.index.(simulation.atoms)
     ## gaussian data
-    #points = gridpoints(sim, resolution; margin=margin)
-    iatoms = PDBTools.index.(sim.atoms)
-    σ = σ .* ones(Float64, length(iatoms))
-    Q = Q[iatoms]
-    for (iframe, frame) in enumerate(sim)
+    A = Q[iatoms] ./ (sqrt(2π) .* σ).^3
+    β = inv.(-2σ.^2) .* ones(Float64, length(iatoms))
+    points = gridpoints(simulation, iatoms, resolution; margin=margin)
+    dimcoords = [ point[dim] for point in points ]
+    density = Vector{Float64}(undef, length(points))
+    for (iframe, frame) in enumerate(simulation)
         coords = MolSimToolkit.positions(frame)[iatoms]
-        surface = gaussmap(coords, Q, σ)
-        points = gridpoints(coords, resolution, margin=margin)
-        axis_coords = [ point[dim] for point in points ]
-        density = surface.(points)
-        # @threads :static for i in eachindex(bins[1:end-1])
-        #     idx = findall(
-        #         coord -> bins[i] <= coord[dim] < bins[i+1],
-        #         points
-        #     )
-        #     isempty(idx) && continue
-        #     @fastmath ρbin = Vbin \ sum(density[idx])
-        #     densities[i,iframe] = isnothing(cutoff) || ρbin >= cutoff ? ρbin : 0.0
-        # end
-        bin_indexes = clamp.(
-            searchsortedfirst.(Ref(bin_edges), axis_coords) .- 1, 1, nbins
+        bincenters[iframe] = mean(coords[dim] for coord in coords)[1]
+        gaussian_density_function!(density, points, coords, A, β)
+        bin_indices = clamp.(
+            searchsortedfirst.(Ref(bin_edges), dimcoords) .- 1, 1, nbins
         )
         hist = zeros(nbins)
-        @inbounds for (idx, d) in zip(bin_indexes, density)
+        @fastmath @inbounds for (idx, d) in zip(bin_indices, density)
             hist[idx] += d
         end
-        hist ./= Vbin
-        hist = ifelse.(hist .>= cutoff, hist, 0.0)
-        densities[:,iframe] = hist
-        if !hascenter
-            Mbins[:,iframe] = avgbins(bin_edges)
-        else
-            avg = mean(coord[dim] for coord in coords)
-            if hassymmetry
-                Mbins[:,iframe] = _fix_binning_symmetry(bin_edges, avg)
-                if !issorted(Mbins[:,iframe])
-                    isorted = sortperm(Mbins[:,iframe])
-                    Mbins[:,iframe], densities[:,iframe] = Mbins[isorted,iframe], densities[isorted,iframe]
-                end
-            else
-                Mbins[:,iframe] = _fix_binning_center(bin_edges, avg)
-            end
-        end
+        densities[:,iframe] = ifelse.(hist .>= cutoff, hist / Vbin, 0.0)
+    end
+    Mbins = Matrix{Float64}(undef, nbins, nframes)
+    @threads for iframe in 1:nframes
+        bins = avgbins(
+            bin_edges,
+            bincenters[iframe];
+            hascenter=hascenter,
+            hassymmetry=hassymmetry
+        )
+        Mbins[:, iframe] = sort(bins)
     end
     return Mbins, densities
 end
-
 
 # function gaussian_profile_1D(
 #     sim::MolSimToolkit.Simulation, Q::Vector{Float64};
@@ -336,47 +421,171 @@ end
 #     margin=0.0,
 #     hascenter=true, hassymmetry=true
 # )
-#     axescode = Dict{String, Int64}("x" => 1, "y" => 2, "z" => 3)
+#     dim = get(
+#         Dict{String, Int64}("x" => 1, "y" => 2, "z" => 3), lowercase(axis), nothing
+#     )
+#     isnothing(dim) && throw(ArgumentError("The axis should be associated with the labels of cartesian axes."))
+#     Vbin, bin_edges = binning(sim; axis=axis, binwidth=binwidth, margin=margin)
+#     nbins, nframes = length(bin_edges)-1, length(sim)
+#     Mbins = zeros(Float64, nbins, nframes)
+#     densities = deepcopy(Mbins)
+#     iatoms = PDBTools.index.(sim.atoms)
+#     ## gaussian data
+#     A = Q[iatoms] ./ (sqrt(2π) .* σ).^3
+#     β = inv.(-2σ.^2) .* ones(Float64, length(iatoms))
+#     points = gridpoints(sim, iatoms, resolution; margin=margin)
+#     axis_coords = [ point[dim] for point in points ]
+#     density = Vector{Float64}(undef, length(points))
+#     for (iframe, frame) in enumerate(sim)
+#         coords = MolSimToolkit.positions(frame)[iatoms]
+#         gaussian_density_function!(density, points, coords, A, β)
+#         bin_indices = clamp.(
+#             searchsortedfirst.(Ref(bin_edges), axis_coords) .- 1, 1, nbins
+#         )
+#         hist = zeros(nbins)
+#         @fastmath @inbounds for (idx, d) in zip(bin_indices, density)
+#             hist[idx] += d
+#         end
+#         densities[:,iframe] = ifelse.(hist .>= cutoff, hist / Vbin, 0.0)
+#         Mbins[:, iframe] = avgbins(
+#             bin_edges,
+#             mean(coord[dim] for coord in coords);
+#             hascenter=hascenter,
+#             hassymmetry=hassymmetry
+#         )
+#     end
+#     return Mbins, densities
+# end
+
+
+function gaussian_profile_2D(
+    simulation::MolSimToolkit.Simulation, Q::Vector{Float64};
+    axis="xy",
+    cutoff=1.0,
+    cswidth=4.0,
+    binwidth=0.5,
+    resolution=0.5,
+    σ=1.0,
+    margin=0.0,
+    hascenter=true, hassymmetry=true
+)
+    #BIN1, BIN2, DENS = [], [], []
+    dims = get(
+        Dict{String, Vector{Int}}(
+            "xy" => [1, 2], "yx" => [1, 2], "xz" => [1, 3],
+            "zx" => [1, 3], "yz" => [2, 3], "zy" => [2, 3]),
+        lowercase("xy"), nothing
+    )
+    isnothing(dims) && throw(ArgumentError("The axis should be associated with the labels of cartesian axes."))
+    dim = filter(t -> !in(t, dims), 1:3)[1]
+    ## binning and pre-allocation
+    Vbin, bin_edges_1, bin_edges_2 = binning(simulation, axis=axis, binwidth=binwidth, margin=margin)
+    cs_bin_edges = binning(simulation, axis=notaxis(axis), binwidth=cswidth)[2]
+    nslabs = length(cs_bin_edges)-1
+    densities = [
+        zeros(Float64, length(bin_edges_1)-1, length(bin_edges_2)-1, nslabs)
+        for _ in 1:length(simulation)
+    ]
+    iatoms = PDBTools.index.(simulation.atoms)
+    ## gaussian data
+    A = Q[iatoms] ./ (sqrt(2π) .* σ).^3
+    β = inv.(-2σ.^2) .* ones(Float64, length(iatoms))
+    points = gridpoints(simulation, resolution; margin=margin)
+    dimcoords1 = [ point[dims[1]] for point in points ]
+    dimcoords2 = [ point[dims[2]] for point in points ]
+    density = zeros(Float64, length(points))
+    for (iframe, frame) in enumerate(simulation)
+        coords = MolSimToolkit.positions(frame)[iatoms]
+        slabindices =get_slab_indices(coords, dim, cs_bin_edges)
+        for islab in 1:nslabs
+            mask = slabindices .== islab
+            sum(mask) == 0 && continue
+            println("align.jlqui")
+            gaussian_density_function!(density, points, coords[mask], A[mask], β[mask])
+            ibin = clamp.(searchsortedfirst.(Ref(bin_edges_1), dimcoords1) .- 1, 1, length(bin_edges_1)-1)
+            jbin = clamp.(searchsortedfirst.(Ref(bin_edges_2), dimcoords2) .- 1, 1, length(bin_edges_2)-1)
+            @inbounds @fastmath for p in 1:length(points)
+                i, j = ibin[p], jbin[p]
+                densities[iframe][i, j, islab] += density[p]
+            end
+            densities[:,:, islab, iframe] ./= Vbin
+            density .= 0.0
+            return densities
+        end
+    end
+
+    Mbins1 = Matrix{Float64}(undef, length(bin_edges_1)-1, length(simulation))
+    Mbins2 = Matrix{Float64}(undef, length(bin_edges_2)-1, length(simulation))
+    return BIN1, BIN2, DENS
+end
+
+# function gaussian_profile_2D(
+#     sim::MolSimToolkit.Simulation, Q::Vector{Float64};
+#     axis="xz", cutoff=1.0, cs=4.0, resolution=0.5, σ=1.0, hascenter=true, hassymmetry=true
+# )
+#     BIN1, BIN2, DENS = [], [], []
+#     axescode = Dict{String, Function}([
+#         ["xy", "yx"] .=> () -> [1,2]; ["xz", "zx"] .=> () -> [1,3]; ["yz", "zy"] .=> () -> [2,3]
+#     ])
 #     if !haskey(axescode, lowercase(axis))
 #         throw(ArgumentError("The axis should be associated with the labels of cartesian axes."))
 #     end
-#     dim = axescode[axis]
-#     Vbin, bins = binning(sim, axis=axis, binwidth=binwidth, margin=margin)
-#     Mbins = zeros(Float64, length(bins)-1, length(sim))
-#     densities = deepcopy(Mbins)
+#     dims = axis2dims(axis)
+#     dim = axis2dims(notaxis(axis))
+#     V, bin1, bin2 = binning(sim, axis=axis, cutoff=cutoff)
+#     cs = binning(sim, axis=notaxis(axis), cutoff=cs)[2]
+#     bins1 = Matrix{Float64}(undef, length(bin1)-1, length(sim))
+#     bins2 = Matrix{Float64}(undef, length(bin2)-1, length(sim))
+#     densities = zeros(Float64, length(bin1)-1, length(bin2)-1, length(sim))
 #     iatoms = PDBTools.index.(sim.atoms)
 #     for (iframe, frame) in enumerate(sim)
-#         coords = MolSimToolkit.positions(frame)[iatoms]
-#         Q = Q[iatoms]
+#         xyz = MolSimToolkit.positions(frame)[iatoms]
 #         σ = σ .* ones(Float64, length(iatoms))
-#         surface = gaussmap(coords, Q, σ)
-#         points = gridpoints(coords, resolution, margin=margin)
-#         density = surface.(points)
-#         @threads :static for i in eachindex(bins[1:end-1])
-#             idx = findall(
-#                 coord -> bins[i] <= coord[dim] < bins[i+1],
-#                 points
-#             )
-#             isempty(idx) && continue
-#             @fastmath ρbin = Vbin \ sum(density[idx])
-#             densities[i,iframe] = isnothing(cutoff) || ρbin >= cutoff ? ρbin : 0.0
-#         end
-#         if !hascenter
-#             Mbins[:,iframe] = avgbins(bins)
-#         else
-#             avg = mean([ coord[dim] for coord in coords ])
-#             if hassymmetry
-#                 Mbins[:,iframe] = _fix_binning_symmetry(bins, avg)
-#                 if !issorted(Mbins[:,iframe])
-#                     isorted = sortperm(Mbins[:,iframe])
-#                     Mbins[:,iframe], densities[:,iframe] = Mbins[isorted,iframe], densities[isorted,iframe]
-#                 end
-#             else
-#                 Mbins[:,iframe] = _fix_binning_center(bins, avg)
+#         A = Q[iatoms] ./ (sqrt(2π) .* σ).^3
+#         α = inv.(-2 .* σ.^ 2)
+#         ρ(r) = sum(
+#             A .* exp.(α .* [ sum((r .- ijk).^2) for ijk in xyz ])
+#         )
+#         for slice in 1:length(cs)-1
+#             coords = filter(coord -> cs[slice] <= coord[dim] <= cs[slice+1], xyz)
+#             if isempty(coords)
+#                 continue
 #             end
+#             points = density_grid(coords, resolution)
+#             density = ρ.(points)
+#             ibin = [ searchsortedfirst(bin1, point[dims[1]]) for point in points ]
+#             jbin = [ searchsortedfirst(bin2, point[dims[2]]) for point in points ]
+#             @inbounds for p in 1:length(points)
+#                 i, j = ibin[p], jbin[p]
+#                 if 1 <= i <= size(densities, 1) && 1 <= j <= size(densities, 2)
+#                     densities[i, j, iframe] += density[p]
+#                 end
+#             end
+#             densities[:,:,iframe] ./= V
+#             if !hascenter
+#                 bins1[:,iframe], bins2[:,iframe] = avgbins(bin1), avgbins(bin2)
+#             else
+#                 avg = mean([ coord[dims] for coord in coords ])
+#                 if hassymmetry
+#                     bins1[:,iframe] = _fix_binning_symmetry(bin1, avg[1])
+#                     bins2[:,iframe] = _fix_binning_symmetry(bin2, avg[2])
+#                     if !issorted(bins1[:,iframe]) || !issorted(bins2[:,iframe])
+#                         isorted, jsorted = sortperm(bins1[:,iframe]), sortperm(bins2[:,iframe])
+#                         bins1[:,iframe], bins2[:,iframe] = bins1[isorted,iframe], bins2[jsorted,iframe]
+#                         densities[:,:,iframe] = densities[isorted,jsorted,iframe]
+#                     end
+#                 else
+#                     bins1[:,iframe] = _fix_binning_center(bin1, avg[1])
+#                     bins2[:,iframe] = _fix_binning_center(bin2, avg[2])
+#                 end
+#             end
+#             push!(BIN1, deepcopy(bins1))
+#             push!(BIN2, deepcopy(bins2))
+#             push!(DENS, deepcopy(densities))
+#             densities .= 0.0
 #         end
 #     end
-#     return Mbins, densities
+#     return BIN1, BIN2, DENS
 # end
 
 ################################################################ Fibril width
