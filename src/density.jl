@@ -256,6 +256,30 @@ function gridpoints(
 end
 
 function density_profile(
+    pdbname::String,
+    trjname::String;
+    axis="z",
+    binwidth=0.5,
+    cutoff=0.05,
+    resolution=0.25,
+    σ=1.0,
+    cs=4.0,
+    margin=2.0,
+    hascenter=true,
+    hassymmetry=true,
+    selection= at -> PDBTools.element(at) != "H",
+    first=1, last=nothing, step=1
+)
+    atoms = PDBTools.select(PDBTools.readPDB(pdbname), selection)
+    simulation = MolSimToolkit.Simulation(atoms, trjname, first=first, last=last, step=step)
+    return density_profile(
+        simulation;
+        axis=axis, binwidth=binwidth, cutoff=cutoff, resolution=resolution, σ=σ, cs=cs, margin=margin,
+        hascenter=hascenter, hassymmetry=hassymmetry
+    )
+end
+
+function density_profile(
     sim::MolSimToolkit.Simulation;
     axis="z",
     binwidth=0.5,
@@ -380,7 +404,7 @@ function gaussian_profile_1D(
     densities = zeros(Float64, nbins, nframes)
     iatoms = PDBTools.index.(simulation.atoms)
     ## gaussian data
-    A = Q[iatoms] ./ (sqrt(2π) .* σ).^3
+    A = Q ./ (sqrt(2π) .* σ).^3
     β = inv.(-2σ.^2) .* ones(Float64, length(iatoms))
     points = gridpoints(simulation, iatoms, resolution; margin=margin)
     dimcoords = [ point[dim] for point in points ]
@@ -411,52 +435,6 @@ function gaussian_profile_1D(
     return Mbins, densities
 end
 
-# function gaussian_profile_1D(
-#     sim::MolSimToolkit.Simulation, Q::Vector{Float64};
-#     axis="z",
-#     cutoff=0.05,
-#     binwidth=0.25,
-#     resolution=0.5,
-#     σ=1.0,
-#     margin=0.0,
-#     hascenter=true, hassymmetry=true
-# )
-#     dim = get(
-#         Dict{String, Int64}("x" => 1, "y" => 2, "z" => 3), lowercase(axis), nothing
-#     )
-#     isnothing(dim) && throw(ArgumentError("The axis should be associated with the labels of cartesian axes."))
-#     Vbin, bin_edges = binning(sim; axis=axis, binwidth=binwidth, margin=margin)
-#     nbins, nframes = length(bin_edges)-1, length(sim)
-#     Mbins = zeros(Float64, nbins, nframes)
-#     densities = deepcopy(Mbins)
-#     iatoms = PDBTools.index.(sim.atoms)
-#     ## gaussian data
-#     A = Q[iatoms] ./ (sqrt(2π) .* σ).^3
-#     β = inv.(-2σ.^2) .* ones(Float64, length(iatoms))
-#     points = gridpoints(sim, iatoms, resolution; margin=margin)
-#     axis_coords = [ point[dim] for point in points ]
-#     density = Vector{Float64}(undef, length(points))
-#     for (iframe, frame) in enumerate(sim)
-#         coords = MolSimToolkit.positions(frame)[iatoms]
-#         gaussian_density_function!(density, points, coords, A, β)
-#         bin_indices = clamp.(
-#             searchsortedfirst.(Ref(bin_edges), axis_coords) .- 1, 1, nbins
-#         )
-#         hist = zeros(nbins)
-#         @fastmath @inbounds for (idx, d) in zip(bin_indices, density)
-#             hist[idx] += d
-#         end
-#         densities[:,iframe] = ifelse.(hist .>= cutoff, hist / Vbin, 0.0)
-#         Mbins[:, iframe] = avgbins(
-#             bin_edges,
-#             mean(coord[dim] for coord in coords);
-#             hascenter=hascenter,
-#             hassymmetry=hassymmetry
-#         )
-#     end
-#     return Mbins, densities
-# end
-
 
 function gaussian_profile_2D(
     simulation::MolSimToolkit.Simulation, Q::Vector{Float64};
@@ -478,29 +456,30 @@ function gaussian_profile_2D(
     isnothing(dims) && throw(ArgumentError("The axis should be associated with the labels of cartesian axes."))
     dim = filter(t -> !in(t, dims), 1:3)[1]
     iatoms = PDBTools.index.(simulation.atoms)
+    Vbin = length(iatoms) * binwidth^2 * cswidth
     ## binning and pre-allocation
-    Vbin, bin_edges_1, bin_edges_2 = binning(simulation, axis=axis, binwidth=binwidth, margin=margin)
+    bin_edges_1, bin_edges_2 = binning(simulation, axis=axis, binwidth=binwidth, margin=margin)[2:3]
     cs_bin_edges = binning(simulation, axis=notaxis(axis), binwidth=cswidth)[2]
-    # Vbin = length(iatoms) * binwidth^2 * cswidth
     nbins1, nbins2, nframes = length(bin_edges_1)-1, length(bin_edges_2)-1, length(simulation)
     nslabs = length(cs_bin_edges)-1
     densities = [ zeros(Float64, nbins1, nbins2, nslabs) for _ in 1:nframes ]
     bincenters1 = zeros(Float64, nframes)
     bincenters2 = zeros(Float64, nframes)
     ## gaussian data
-    A = Q[iatoms] ./ (sqrt(2π) .* σ).^3
+    A = Q ./ (sqrt(2π) .* σ).^3
     β = inv.(-2σ.^2) .* ones(Float64, length(iatoms))
     ## gridpoints to calculate density
     points = gridpoints(simulation, resolution; margin=margin)
     dimcoords1, dimcoords2 = [ point[dims[1]] for point in points ], [ point[dims[2]] for point in points ]
     for (iframe, frame) in enumerate(simulation)
         coords = MolSimToolkit.positions(frame)[iatoms]
-        slabindices =get_slab_indices(coords, dim, cs_bin_edges)
+        slabindices = get_slab_indices(coords, dim, cs_bin_edges)
         bincenters1[iframe] = mean(coord[dims[1]] for coord in coords)
         bincenters2[iframe] = mean(coord[dims[2]] for coord in coords)
         for islab in 1:nslabs
             mask = slabindices .== islab
-            sum(mask) == 0 && continue
+            n_slab_atoms = sum(mask)
+            iszero(n_slab_atoms) && continue
             density = zeros(Float64, length(points))
             gaussian_density_function!(density, points, coords[mask], A[mask], β[mask])
             ibin = clamp.(
@@ -579,7 +558,7 @@ function fibrilwidth(
     bin2::Matrix{Float64},
     densities::Array{Float64, 3};
     step=1.0,
-    tol=0.005
+    tol=0.0
 )
     valid_regions = mapping_density(densities, tol=tol)   
     n_frames = size(densities, 3)
@@ -609,66 +588,156 @@ end
 
 function density_profile(
     bin1::Matrix{Float64}, bin2::Matrix{Float64}, densities::Array{Float64, 3};
-    frame=nothing, smoothing=false, bins=200, colors=:Greens,
-    xlabel="x-axis (Å)", ylabel="y-axis (Å)", xlims=nothing, ylims=nothing
+    islab=nothing, smoothing=true, bins=200, colors=:Greens,
+    xlabel="X (Å)", ylabel="Y (Å)", title="", xlims=nothing, ylims=nothing, clims=nothing
 )
-    @assert size(bin1, 2) == size(bin2, 2) == size(densities, 3) "The number of frames should be the same."
-    xlims = !isnothing(xlims) ? (-xlims, xlims) : (minimum(bin1), maximum(bin1))
-    ylims = !isnothing(ylims) ? (-ylims, ylims) : (minimum(bin2), maximum(bin2))
-    if isnothing(frame)
-        edp_plotting_averages(
-            bin1, bin2, densities; smoothing=smoothing, bins=bins, colors=colors,
-            xlabel=xlabel, ylabel=ylabel, xlims=xlims, ylims=ylims
+    xlims = !isnothing(xlims) ? xlims : (minimum(bin1), maximum(bin1))
+    ylims = !isnothing(ylims) ? ylims : (minimum(bin2), maximum(bin2))
+    if isnothing(islab)
+        return density_slab_average(
+            bin1, bin2, densities; smoothing=smoothing, nbins=bins, colors=colors,
+            xlabel=xlabel, ylabel=ylabel, xlims=xlims, ylims=ylims, title=title
         )
     end
-    return Plots.current()
+    title = title == "" ? "slab $islab" : title
+    projx = bin1[:,islab]
+    projy = bin2[:,islab]
+    density = densities[:,:,islab]
+    if smoothing
+        projx, projy, density = interpol(projx, projy, density, bins=bins)
+    end
+    return density_heatmap(
+        projx, projy, density;
+        colors=colors, xlabel=xlabel, ylabel=ylabel, xlims=xlims, ylims=ylims, clims=clims,
+        title=title
+    )
 end
 
-function edp_plotting_averages(
-    bin1, bin2, densities; smoothing=true, bins=200, colors=:Greens,
-    xlabel="x-axis (Å)", ylabel="y-axis (Å)", xlims=nothing, ylims=nothing
+function density_profile_animation(
+    bin1::Matrix{Float64}, bin2::Matrix{Float64}, densities::Array{Float64, 3}; fps=2,
+    smoothing=true, nbins=200, colors=:Greens, xlabel="X (Å)", ylabel="Y (Å)",
+    xlims=nothing, ylims=nothing, gifname=nothing
 )
-    nframes = size(densities, 3)
-    projx = smoothing ? zeros(Float64, bins) : zeros(Float64, size(bin1, 1))
-    projy = smoothing ? zeros(Float64, bins) : zeros(Float64, size(bin2, 1))
-    ρ_new = smoothing ? zeros(Float64, bins, bins) : zeros(Float64, size(densities, 1), size(densities, 2))
-    for iframe in 1:nframes
+    min_density, max_density = extrema(densities)
+    nslabs = size(densities, 3)
+    anim = Plots.@animate for islab in 1:nslabs
+        p = density_profile(
+            bin1, bin2, densities;
+            islab=islab, smoothing=smoothing, bins=nbins, colors=colors,
+            xlabel=xlabel, ylabel=ylabel, title="slab $islab",
+            xlims=xlims, ylims=ylims
+        )
+        Plots.plot!(p, clims=(min_density, max_density))
+    end
+    gifname = isnothing(gifname) ? tempname() * ".gif" : gifname
+    Plots.gif(anim, gifname, fps=fps, show_msg=false)
+    return gifname
+end
+
+
+function density_slab_average(
+    bins1, bins2, densities; smoothing=true, nbins=200, colors=:Greens, title="",
+    xlabel="", ylabel="", xlims=nothing, ylims=nothing, clims=nothing
+)
+    nslabs = size(densities, 3)
+    projx = smoothing ? zeros(Float64, nbins) : zeros(Float64, size(bins1, 1))
+    projy = smoothing ? zeros(Float64, nbins) : zeros(Float64, size(bins2, 1))
+    ρ_new = smoothing ? zeros(Float64, nbins, nbins) : zeros(Float64, size(densities, 1), size(densities, 2))
+    for islabs in 1:nslabs
         x, y, z = if smoothing
-                interpol(bin1[:,iframe], bin2[:,iframe], densities[:,:,iframe], bins=bins)
+            interpol(bins1[:,islabs], bins2[:,islabs], densities[:,:,islabs], bins=nbins)
             else
-                bin1[:,iframe], bin2[:,iframe], densities[:,:,iframe]
+                bins1[:,islabs], bins2[:,islabs], densities[:,:,islabs]
         end
         projx .+= x
         projy .+= y
         ρ_new .+= z
     end
-    projx ./= nframes
-    projy ./= nframes
-    ρ_new ./= nframes
-    Plots.gr(size=(1000,800), dpi=900, fmt=:png)
-    Plots.heatmap(
-        projx, projy, ρ_new',
-        color=colors,
-        clims=(minimum(ρ_new), maximum(ρ_new)),
-        xlabel=xlabel, ylabel=ylabel, fontfamily=:arial,
-        ## Axis configs
-        xlims=xlims, ylims=ylims,
-        framestyle=:box,
-        grid=true,
-        minorgrid=true,
-        minorticks=5,
-        thick_direction=:out,
-        ## Font configs
-        titlefontsize=18,
-        guidefontsize=16,
-        tickfontsize=16,
-        labelfontsize=18,
-        legendfontsize=16,
-        guidefonthalign=:center,
-        ## Margins
-        left_margin=5Plots.Measures.mm,
-        right_margin=10Plots.Measures.mm,
-        top_margin=10Plots.Measures.mm,
-        bottom_margin=1Plots.Measures.mm
+    projx ./= nslabs
+    projy ./= nslabs
+    ρ_new ./= nslabs
+    return density_heatmap(
+        projx, projy, ρ_new;
+        colors=colors, xlabel=xlabel, ylabel=ylabel, xlims=xlims, ylims=ylims, clims=clims,
+        title=title
     )
 end
+
+function density_heatmap(
+    bins1::AbstractVector{T}, bins2::AbstractVector{T}, densities::AbstractMatrix{T};
+    colors=:Greens, xlabel="x-axis (Å)", ylabel="y-axis (Å)", title="", clims=nothing,
+    xlims=nothing, ylims=nothing
+) where T
+    clims = isnothing(clims) ? extrema(densities) : clims
+    #Plots.gr(size=(1000,800), dpi=900, fmt=:png)
+    Plots.gr(size=(1000,800), dpi=400, fmt=:png)
+    Plots.heatmap(
+        bins1, bins2, densities', color=colors, title=title, clims=clims,
+        xlabel=xlabel, ylabel=ylabel, fontfamily=:arial,
+        ## Axis configs
+        xlims=xlims, ylims=ylims, framestyle=:box, grid=true, minorgrid=true, minorticks=5, thick_direction=:out,
+        ## Font configs
+        titlefontsize=28, tickfontsize=22, labelfontsize=28, legendfontsize=16,
+        guidefontsize=16, guidefonthalign=:center,
+        ## Margins
+        left_margin=5Plots.Measures.mm, right_margin=10Plots.Measures.mm,
+        top_margin=2Plots.Measures.mm, bottom_margin=2Plots.Measures.mm
+    )
+    return Plots.current()
+end
+
+
+function fibrilwidth(
+    diameters::Vector{Vector{T}};
+    colors=mycolorblind,
+    labels=nothing
+) where T
+    Plots.gr(size=(1000,800), dpi=900, fmt=:png)
+    for (i, diameter) in enumerate(diameters)
+        label = isnothing(labels) ? "$i" : labels[i]
+        if i == 1
+            Plots.density(
+                diameter, normalize=true, bandwidth=1.5, linewidth=5,
+                color=colors[i], title="", xlabel="diameter (Å)", ylabel="Frequency", label=label,
+                fontfamily=:arial,
+                ## Axis configs
+                framestyle=:box, grid=true, minorgrid=true, minorticks=5, thick_direction=:out,
+                ## Font configs
+                titlefontsize=28, tickfontsize=22, labelfontsize=28, legendfontsize=16,
+                guidefontsize=16, guidefonthalign=:center,
+                ## Margins
+                left_margin=5Plots.Measures.mm, right_margin=10Plots.Measures.mm,
+                top_margin=2Plots.Measures.mm, bottom_margin=2Plots.Measures.mm
+            )
+            continue
+        end
+        Plots.density!(
+            diameter, normalize=true, bandwidth=1.5, linewidth=5,
+            color=colors[i], label=label
+        )
+    end
+    return Plots.current()
+end
+
+# using FileIO
+
+# default(dpi=300)
+
+# for iseg in 1:60  # Itera sobre todos os segmentos
+#     filenames = ["./hammer_aitoff_timeresolved/100_lipids/2d_density_map/LNP/POPC/png/l_S$(iseg)part$(part).png" for part in 0:99]
+
+#     anim = @animate for (i, filename) in enumerate(filenames)
+#         img = FileIO.load(filename)  # Carrega a imagem diretamente
+
+#         p = plot(heatmap(img, size=(1800, 400)),
+#                  xlims=(0, size(img, 2)),
+#                  ylims=(0, size(img, 1)),
+#                  xaxis=false,
+#                  yaxis=false,
+#                  framestyle=:none)
+
+#         annotate!((size(img,2)/2), size(img, 1), ("$i", 10, :black, "Computer Modern"))
+#     end
+
+#     gif(anim, "./hammer_aitoff_timeresolved/100_lipids/2d_density_map/LNP/POPC/gif/l_S$(iseg).gif", fps=7)
+# end
